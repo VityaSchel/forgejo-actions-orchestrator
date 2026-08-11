@@ -2,7 +2,9 @@
 set -euo pipefail
 
 readonly target=x86_64-unknown-linux-musl
+readonly zig_target=x86_64-linux-musl
 readonly zig_required=0.16.0
+readonly clang_required="clang version 21.1.0"
 readonly name=forgejo-actions-orchestrator
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -21,6 +23,22 @@ if [ "$zig_found" != "$zig_required" ]; then
 	echo "another zig links another musl and moves the hash" >&2
 	exit 1
 fi
+
+# a distro zig reports the pinned version while linking its own rolling LLVM
+# piping into head would close the pipe early and trip pipefail
+clang_banner=$(zig cc -target "$zig_target" -v -E -x c /dev/null 2>&1) || true
+clang_found=${clang_banner%%$'\n'*}
+if [ "$clang_found" != "$clang_required" ]; then
+	echo "zig $zig_required must carry '$clang_required', found '$clang_found'" >&2
+	echo "install the tarball from https://ziglang.org/download/" >&2
+	echo "a packaged zig links the system LLVM and moves the hash" >&2
+	exit 1
+fi
+
+# the shared cache hands objects an earlier zig built back to this one,
+# mixing two toolchains inside one binary
+export ZIG_GLOBAL_CACHE_DIR="$root/target/zig-cache"
+rm -rf "$ZIG_GLOBAL_CACHE_DIR"
 
 sysroot=$(rustc --print sysroot)
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
