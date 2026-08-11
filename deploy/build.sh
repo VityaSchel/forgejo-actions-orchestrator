@@ -57,6 +57,8 @@ rustflags="--remap-path-prefix=$sysroot=/rust"
 rustflags="$rustflags --remap-path-prefix=$cargo_home=/cargo"
 rustflags="$rustflags --remap-path-prefix=$root=/build"
 
+cargo clean --target "$target" --release
+
 RUSTFLAGS="$rustflags" cargo zigbuild --target "$target" --release --locked
 
 readonly out=target/$target/release/$name
