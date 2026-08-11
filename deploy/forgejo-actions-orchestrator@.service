@@ -10,12 +10,9 @@ Type=exec
 ExecStart=/usr/local/bin/forgejo-actions-orchestrator --config /etc/forgejo-actions-orchestrator/%i.toml
 
 # install -d -o root -g root -m 700 /etc/forgejo-actions-orchestrator/credentials/%i
+# Provider tokens go in a per-instance drop-in at forgejo-actions-orchestrator@%i.service.d/ — see deploy/providers.example.conf.
 LoadCredential=forgejo-runner-token:/etc/forgejo-actions-orchestrator/credentials/%i/forgejo-runner-token
 LoadCredential=forgejo-status-token:/etc/forgejo-actions-orchestrator/credentials/%i/forgejo-status-token
-LoadCredential=hetzner-token:/etc/forgejo-actions-orchestrator/credentials/%i/hetzner-token
-LoadCredential=vultr-token:/etc/forgejo-actions-orchestrator/credentials/%i/vultr-token
-LoadCredential=cherry-token:/etc/forgejo-actions-orchestrator/credentials/%i/cherry-token
-LoadCredential=cherry-project-id:/etc/forgejo-actions-orchestrator/credentials/%i/cherry-project-id
 Restart=always
 RestartSec=5s
 KillSignal=SIGTERM

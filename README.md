@@ -27,16 +27,26 @@ A daemon watching an allowlist of Forgejo repositories and automatically renting
 
 2. Configure for systemd:
    ```sh
-   # If using downloaded binary:
+   # Replace MYSITE with your custom name, e.g. forgejo or git.example.org
+
+   # 1. Create necessary files
+   #  If using downloaded binary:
    wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main/deploy/forgejo-actions-orchestrator@.service
    install -Dm644 forgejo-actions-orchestrator@.service /etc/systemd/system/forgejo-actions-orchestrator@.service
+   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main/deploy/providers.example.conf
+   install -Dm644 providers.example.conf /etc/systemd/system/forgejo-actions-orchestrator@MYSITE.service.d/providers.conf
+   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main/config.example.toml
 
-   # If building from source:
+   #  If building from source:
    install -Dm644 deploy/forgejo-actions-orchestrator@.service /etc/systemd/system/forgejo-actions-orchestrator@.service
+   install -Dm644 deploy/providers.example.conf /etc/systemd/system/forgejo-actions-orchestrator@MYSITE.service.d/providers.conf
 
-   install -Dm644 config.example.toml /etc/forgejo-actions-orchestrator/my-site.toml
-   install -d -m700 /etc/forgejo-actions-orchestrator/credentials/my-site
-   # Edit /etc/forgejo-actions-orchestrator/my-site.toml
+   # 2. Edit /etc/systemd/system/forgejo-actions-orchestrator@MYSITE.service.d/providers.conf
+   #  Keep only providers you use, otherwise you'd be getting 243/CREDENTIALS errors
+
+   # 3. Configure the daemon
+   install -Dm644 config.example.toml /etc/forgejo-actions-orchestrator/MYSITE.toml
+   # Edit /etc/forgejo-actions-orchestrator/MYSITE.toml
    ```
 
    - `forgejo.url` — your instance
@@ -53,6 +63,8 @@ A daemon watching an allowlist of Forgejo repositories and automatically renting
    One file per secret, `0400 root:root`, passed by systemd `LoadCredential=`.
    
    ```sh
+   install -d -m700 /etc/forgejo-actions-orchestrator/credentials/my-site
+
    umask 077
    cd /etc/forgejo-actions-orchestrator/credentials/my-site
    printf %s 'TOKEN' > forgejo-runner-token
@@ -96,12 +108,12 @@ Healthy service only logs once on launch and doesn't repeat:
 INFO watching repos=["owner/repo"] labels=["check", "release", …] interval=15s
 ```
 
-| Symptom                                                 | Cause                                                                     |
-| ------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `243/CREDENTIALS`                                       | a `LoadCredential=` source file is missing — create it or delete the line |
-| `Permission denied` reading config, restarting every 5s | config is not `0644`                                                      |
-| `poll_failed` with `HTTP 404`                           | repo not in the allowlist, or Actions disabled on it                      |
-| `poll_failed` with `HTTP 403`                           | runner token is not org-Owner                                             |
+| Symptom                                                 | Cause                                                                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `243/CREDENTIALS`                                       | a `LoadCredential=` source file is missing — create it, or drop the line from the instance's `providers.conf` |
+| `Permission denied` reading config, restarting every 5s | config is not `0644`                                                                                          |
+| `poll_failed` with `HTTP 404`                           | repo not in the allowlist, or Actions disabled on it                                                          |
+| `poll_failed` with `HTTP 403`                           | runner token is not org-Owner                                                                                 |
 
 Do **not** disable a provider by deleting its `[[label]]` while machines are live — that removes it from the survey and they are never destroyed. Stop the daemon and delete them by hand instead.
 
