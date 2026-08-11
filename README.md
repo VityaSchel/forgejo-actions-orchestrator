@@ -25,9 +25,15 @@ A daemon watching an allowlist of Forgejo repositories and automatically renting
    install -Dm755 target/release/forgejo-actions-orchestrator /usr/local/bin/forgejo-actions-orchestrator
    ```
 
-1. Configure for systemd:
+2. Configure for systemd:
    ```sh
+   # If using downloaded binary:
+   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main/deploy/forgejo-actions-orchestrator@.service
+   install -Dm644 forgejo-actions-orchestrator@.service /etc/systemd/system/forgejo-actions-orchestrator@.service
+
+   # If building from source:
    install -Dm644 deploy/forgejo-actions-orchestrator@.service /etc/systemd/system/forgejo-actions-orchestrator@.service
+
    install -Dm644 config.example.toml /etc/forgejo-actions-orchestrator/my-site.toml
    install -d -m700 /etc/forgejo-actions-orchestrator/credentials/my-site
    # Edit /etc/forgejo-actions-orchestrator/my-site.toml
@@ -42,7 +48,7 @@ A daemon watching an allowlist of Forgejo repositories and automatically renting
    boots fastest but versions the toolchain outside the repository and only works on Hetzner, or a
    stock OS image plus a setup step, which is slower but versions the environment with the code.
 
-2. Set credentials
+3. Set credentials
 
    One file per secret, `0400 root:root`, passed by systemd `LoadCredential=`.
    

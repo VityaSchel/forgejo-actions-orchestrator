@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: docker
+    container:
+      image: rust:bookworm
+    env:
+      ZIG_VERSION: "0.16.0"
+      ZIG_SHA256: "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"
+      ZIGBUILD_VERSION: "0.22.3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install zig from the official tarball
+        run: |
+          apt-get update -y
+          DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils
+          tarball="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          curl -fsSLO "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
+          echo "${ZIG_SHA256}  ${tarball}" | sha256sum -c
+          tar xf "$tarball" -C /opt
+          echo "/opt/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked --version "${ZIGBUILD_VERSION}"
+
+      - name: Build
+        run: ./deploy/build.sh
+
+      - name: Publish the checksum
+        run: |
+          out=target/x86_64-unknown-linux-musl/release/forgejo-actions-orchestrator
+          {
+            echo '### forgejo-actions-orchestrator-linux-x86_64'
+            echo
+            echo '```'
+            sha256sum "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: forgejo-actions-orchestrator-linux-x86_64
+          path: target/x86_64-unknown-linux-musl/release/forgejo-actions-orchestrator
