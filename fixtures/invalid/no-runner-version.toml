@@ -1,0 +1,24 @@
+[forgejo]
+url = "https://git.example.org"
+
+[[repo]]
+owner = "acme"
+name = "widgets"
+
+[[repo]]
+owner = "acme"
+name = "gadgets"
+
+[daemon]
+runner_version = ""
+runner_sha256 = "2b4c3751fc2f9a60f753ef97414949de25587dfa2b921870b0cb6cb7c9bf7080"
+reconcile_grace_secs = 0
+
+[[label]]
+labels = ["check"]
+provider = "hetzner"
+plans = ["cx43"]
+locations = ["fsn1"]
+image = "snapshot-1"
+max_vms = 1
+allowed_events = ["pull_request"]

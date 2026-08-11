@@ -1,0 +1,79 @@
+[forgejo]
+url = "https://git.example.org"
+
+#! Only repositories listed here are polled, a repo without Actions enabled 404s every poll
+[[repo]]
+owner = "example"
+name = "example"
+
+# [[repo]]
+# owner = "example"
+# name = "another-repo"
+
+[daemon]
+poll_interval_secs = 15
+reconcile_grace_secs = 300
+runner_version = "12.13.2"
+runner_sha256 = "2b4c3751fc2f9a60f753ef97414949de25587dfa2b921870b0cb6cb7c9bf7080"
+
+#! Optional. POST {kind, subject, detail, consecutive}
+# [alert]
+# webhook_url = "https://git.example.org/_hooks/ci-orchestrator"
+
+#! ========== Pull request checks ==========
+#! A job is matched exactly against a [[label]] by its label set
+
+[[label]]
+labels = ["check", "hetzner"]
+provider = "hetzner"
+#!  cx43:  8 shared vCPU, 16 GB RAM, €0.031/hr
+#!  cx53: 16 shared vCPU, 32 GB RAM, €0.057/hr
+#! cpx42:  8 shared vCPU, 16 GB RAM, €0.135/hr
+plans = ["cx43", "cx53", "cpx42"]
+locations = ["fsn1", "nbg1", "hel1"]
+#! A pre-baked snapshot id
+image = "000000000"
+# ssh_key = "..."
+max_vms = 1
+lifetime_minutes = 90
+#! allow_fork_pull_request = true because this label reaches no secret
+allow_fork_pull_request = true
+allowed_events = ["pull_request", "pull_request_target", "workflow_dispatch"]
+
+#! ============== Releases ==============
+
+[[label]]
+labels = ["release", "hetzner"]
+provider = "hetzner"
+plans = ["cx43", "cx53", "cpx42"]
+locations = ["fsn1", "nbg1", "hel1"]
+image = "debian-12"
+max_vms = 1
+lifetime_minutes = 90
+#! allow_fork_pull_request = false because jobs can read a signing key or publish token
+allow_fork_pull_request = false
+allowed_events = ["push", "workflow_dispatch"]
+
+#! ========== Other providers ==========
+#! Vultr takes a numeric os_id and Cherry an OS slug, so neither can boot a snapshot.
+
+# [[label]]
+# labels = ["build", "vultr"]
+# provider = "vultr"
+#! vhp-8c-16gb-amd: 8 shared vCPUs, 16 GB RAM, $0.132/hr
+# plans = ["vhp-8c-16gb-amd"]
+# locations = ["ams", "fra", "cdg", "waw", "ewr", "ord", "dfw", "lax", "sgp"]
+#! 2136: Debian 12 x64
+# image = "2136"
+# lifetime_minutes = 90
+# allowed_events = ["push", "workflow_dispatch"]
+
+# [[label]]
+# labels = ["build", "cherry"]
+# provider = "cherry"
+#! G1-8-32gb-200nv-ded: 8 dedicated vCPUs, 32 GB RAM, €0.184/hr
+# plans = ["G1-8-32gb-200nv-ded"]
+# locations = ["LT-Siauliai", "NL-Amsterdam", "US-Chicago", "SG-Singapore"]
+# image = "debian_12_64bit"
+# lifetime_minutes = 90
+# allowed_events = ["push", "workflow_dispatch"]
