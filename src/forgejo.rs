@@ -321,6 +321,11 @@ impl Client {
 		format!("token {}", self.runner_token)
 	}
 
+	fn redact(&self, body: &str) -> String {
+		body.replace(&self.runner_token, "[redacted]")
+			.replace(&self.status_token, "[redacted]")
+	}
+
 	async fn decode<T: serde::de::DeserializeOwned>(
 		&self,
 		response: reqwest::Response,
@@ -329,10 +334,13 @@ impl Client {
 		let status = response.status();
 		let body = response.text().await.unwrap_or_default();
 		if !status.is_success() {
-			bail!("{what}: HTTP {status}: {}", truncate(&body, 200));
+			bail!(
+				"{what}: HTTP {status}: {}",
+				truncate(&self.redact(&body), 200)
+			);
 		}
 		serde_json::from_str(&body).with_context(|| {
-			format!("{what}: decoding {}", truncate(&body, 200))
+			format!("{what}: decoding {}", truncate(&self.redact(&body), 200))
 		})
 	}
 
@@ -346,7 +354,10 @@ impl Client {
 			return Ok(());
 		}
 		let body = response.text().await.unwrap_or_default();
-		bail!("{what}: HTTP {status}: {}", truncate(&body, 200))
+		bail!(
+			"{what}: HTTP {status}: {}",
+			truncate(&self.redact(&body), 200)
+		)
 	}
 }
 
@@ -514,6 +525,53 @@ mod tests {
 			owner: "acme".into(),
 			name: "widgets".into(),
 		}
+	}
+
+	fn fake_forgejo_rejecting_with(body: String) -> String {
+		let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+		let address = listener.local_addr().expect("addr");
+		std::thread::spawn(move || {
+			for connection in listener.incoming().take(1) {
+				let Ok(mut stream) = connection else { continue };
+				let mut reader = BufReader::new(
+					stream.try_clone().expect("clone the accepted socket"),
+				);
+				let mut request_line = String::new();
+				reader.read_line(&mut request_line).expect("request line");
+				read_headers(&mut reader);
+				let _ = write!(
+					stream,
+					"HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\n\
+					 content-length: {}\r\nconnection: close\r\n\r\n{body}",
+					body.len()
+				);
+			}
+		});
+		format!("http://{address}")
+	}
+
+	#[tokio::test]
+	async fn a_rejected_token_is_never_echoed_back_into_the_error() {
+		let url = fake_forgejo_rejecting_with(
+			r#"{"message":"access token does not exist [sha: runner-tok]"}"#
+				.to_owned(),
+		);
+		let client =
+			Client::new(&url, "runner-tok".into(), "status-tok".into())
+				.unwrap();
+
+		let error = client
+			.waiting_jobs(&repo(), &["check".to_owned()])
+			.await
+			.expect_err("401 must fail")
+			.to_string();
+
+		assert!(
+			!error.contains("runner-tok"),
+			"Forgejo echoes the rejected token, and this error reaches the journal \
+			 and the alert webhook: {error}"
+		);
+		assert!(error.contains("[redacted]"), "got {error}");
 	}
 
 	#[tokio::test]
