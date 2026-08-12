@@ -242,6 +242,7 @@ mod tests {
 			ssh_key: None,
 			max_vms: 1,
 			lifetime_minutes: 90,
+			job_timeout_minutes: None,
 			allow_fork_pull_request: true,
 			allowed_events: vec!["pull_request".into()],
 		}

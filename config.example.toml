@@ -36,6 +36,9 @@ image = "000000000"
 # ssh_key = "..."
 max_vms = 1
 lifetime_minutes = 90
+#! Job time from runner startup, so leave room for boot. Unlike a workflow's own
+#! timeout-minutes, a pull request cannot raise it. Defaults to lifetime_minutes.
+job_timeout_minutes = 60
 #! allow_fork_pull_request = true because this label reaches no secret
 allow_fork_pull_request = true
 allowed_events = ["pull_request", "pull_request_target", "workflow_dispatch"]

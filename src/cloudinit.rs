@@ -78,6 +78,10 @@ pub fn render(
             ),
             WriteFile::readable("job-handle", handle.to_owned()),
             WriteFile::readable(
+                "runner-config.yml",
+                format!("runner:\n  timeout: {}m\n", label.job_timeout()),
+            ),
+            WriteFile::readable(
                 "runner-url",
                 format!(
                     "https://code.forgejo.org/forgejo/runner/releases/download/v{version}/forgejo-runner-{version}-linux-amd64"
@@ -127,6 +131,7 @@ mod tests {
 			ssh_key: None,
 			max_vms: 1,
 			lifetime_minutes: 90,
+			job_timeout_minutes: None,
 			allow_fork_pull_request: true,
 			allowed_events: vec!["pull_request".into()],
 		}
@@ -285,6 +290,23 @@ mod tests {
 	}
 
 	#[test]
+	fn the_runner_is_given_a_timeout_it_cannot_be_talked_out_of() {
+		let config = rendered(&registration(), "H1");
+		assert_eq!(
+			file(&config, "runner-config.yml")["content"],
+			serde_json::json!(format!(
+				"runner:\n  timeout: {}m\n",
+				label().job_timeout()
+			)),
+			"a hung job must lose its runner before the machine is destroyed"
+		);
+		assert!(
+			BOOT.contains("--config \"$etc/runner-config.yml\""),
+			"the config is written but never passed to the runner"
+		);
+	}
+
+	#[test]
 	fn the_script_reads_from_the_directory_the_files_are_written_to() {
 		assert!(
 			BOOT.contains(&format!("etc={ETC}\n")),
@@ -303,6 +325,7 @@ mod tests {
 			"runner-token",
 			"runner-url",
 			"runner.sha256",
+			"runner-config.yml",
 		] {
 			assert!(BOOT.contains(name), "{name} is written but never read");
 			file(&config, name);

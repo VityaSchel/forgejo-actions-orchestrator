@@ -30,7 +30,7 @@ if [ ${#labels[@]} -eq 0 ]; then
 fi
 
 systemd-run --collect --unit=forgejo-actions-runner --setenv=HOME=/root \
-	"$runner" one-job \
+	"$runner" --config "$etc/runner-config.yml" one-job \
 	--url "$(cat "$etc/forgejo-url")" \
 	--uuid "$(cat "$etc/runner-uuid")" \
 	--token-url "file://$etc/runner-token" \

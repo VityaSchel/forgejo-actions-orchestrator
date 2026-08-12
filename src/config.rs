@@ -63,6 +63,8 @@ pub struct Label {
 	#[serde(default = "default_lifetime_minutes")]
 	pub lifetime_minutes: u64,
 	#[serde(default)]
+	pub job_timeout_minutes: Option<u64>,
+	#[serde(default)]
 	pub allow_fork_pull_request: bool,
 	pub allowed_events: Vec<String>,
 }
@@ -163,6 +165,15 @@ impl Config {
 			if label.max_vms == 0 {
 				bail!("label {} has max_vms = 0", label.name());
 			}
+			if let Some(timeout) = label.job_timeout_minutes {
+				if timeout == 0 || timeout >= label.lifetime_minutes {
+					bail!(
+						"label {} has job_timeout_minutes = {timeout}, which must be between 1 and lifetime_minutes ({}) exclusive, or the machine is destroyed before the runner can fail the job cleanly",
+						label.name(),
+						label.lifetime_minutes
+					);
+				}
+			}
 			let longest =
 				crate::naming::machine_name(&label.name(), &"0".repeat(36));
 			if longest.len() > HOSTNAME_LIMIT {
@@ -214,6 +225,10 @@ impl Label {
 	pub fn name(&self) -> String {
 		label_set(&self.labels).join("-")
 	}
+
+	pub fn job_timeout(&self) -> u64 {
+		self.job_timeout_minutes.unwrap_or(self.lifetime_minutes)
+	}
 }
 
 fn label_set(labels: &[String]) -> Vec<&str> {
@@ -251,6 +266,8 @@ mod tests {
 			include_str!("../fixtures/invalid/prefix-label.toml");
 		pub const ZERO_MAX_VMS: &str =
 			include_str!("../fixtures/invalid/zero-max-vms.toml");
+		pub const JOB_TIMEOUT_PAST_LIFETIME: &str =
+			include_str!("../fixtures/invalid/job-timeout-past-lifetime.toml");
 		pub const UNKNOWN_PROVIDER: &str =
 			include_str!("../fixtures/invalid/unknown-provider.toml");
 		pub const LABEL_NAME_TOO_LONG: &str =
@@ -329,6 +346,23 @@ mod tests {
 	#[test]
 	fn rejects_a_label_with_no_allowed_events() {
 		rejects(invalid::NO_ALLOWED_EVENTS, "no allowed_events");
+	}
+
+	#[test]
+	fn rejects_a_job_timeout_that_outlives_the_machine() {
+		rejects(invalid::JOB_TIMEOUT_PAST_LIFETIME, "job_timeout_minutes");
+	}
+
+	#[test]
+	fn a_job_timeout_defaults_to_the_machine_lifetime() {
+		let config = Config::parse(VALID).expect("valid config");
+		for label in &config.labels {
+			assert_eq!(
+				label.job_timeout(),
+				label.lifetime_minutes,
+				"unset job_timeout_minutes must not leave the runner on its 3h default"
+			);
+		}
 	}
 
 	#[test]
