@@ -2,47 +2,130 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: tag to build; its release must already exist
+        required: true
+
+concurrency:
+  group: orchestrator-release-${{ forgejo.event.inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
   build:
-    runs-on: docker
-    container:
-      image: rust:bookworm
+    runs-on: ["release-x86", "hetzner"]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: >-
+          /usr/bin/env
+          -u GITHUB_TOKEN -u FORGEJO_TOKEN
+          -u ACTIONS_RUNTIME_TOKEN
+          -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL
+          -u ACTIONS_CACHE_URL -u ACTIONS_RUNTIME_URL -u ACTIONS_RESULTS_URL
+          bash --noprofile --norc -e -o pipefail {0}
     env:
+      RELEASE_TAG: ${{ forgejo.event.inputs.tag }}
+      ASSET: forgejo-actions-orchestrator-linux-x86_64
+      WORKSPACE: /opt/orchestrator-release
+      CARGO_HOME: /opt/rust/cargo
+      RUSTUP_HOME: /opt/rust/rustup
+      CARGO_TERM_COLOR: never
+      CARGO_TERM_PROGRESS_WHEN: never
+      RUSTUP_VERSION: "1.29.0"
+      RUSTUP_SHA256: "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10"
       ZIG_VERSION: "0.16.0"
       ZIG_SHA256: "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"
       ZIGBUILD_VERSION: "0.22.3"
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install zig from the official tarball
+      - name: Verify CI environment
         run: |
-          apt-get update -y
-          DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils
+          leaked=$(env | grep -iE '(TOKEN|SECRET|PASSWORD|CREDENTIAL|KEY)=.' || true)
+          [ -z "$leaked" ] || { echo "FATAL: privileged credential reachable by build code:"; echo "$leaked" | sed 's/=.*/=<redacted>/'; exit 1; }
+
+      - name: Check out the tag
+        run: |
+          : "${WORKSPACE:?}" "${RELEASE_TAG:?}"
+          rm -rf "$WORKSPACE"
+          mkdir -p "$WORKSPACE"
+          cd "$WORKSPACE"
+
+          git init -q .
+          git remote add origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          git fetch -q --depth 1 origin "refs/tags/$RELEASE_TAG"
+          git checkout -q FETCH_HEAD
+          echo "building $RELEASE_TAG at $(git rev-parse HEAD)"
+
+      - name: Install system packages
+        run: |
+          missing=()
+          command -v cc >/dev/null 2>&1 || missing+=(gcc libc6-dev)
+          command -v xz >/dev/null 2>&1 || missing+=(xz-utils)
+          command -v jq >/dev/null 2>&1 || missing+=(jq)
+          if [ ${#missing[@]} -gt 0 ]; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -y
+            apt-get install -y --no-install-recommends "${missing[@]}"
+          fi
+
+      - name: Install the pinned toolchain
+        run: |
+          curl -fsSLo /tmp/rustup-init \
+            "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init"
+          echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c -
+          chmod +x /tmp/rustup-init
+          /tmp/rustup-init -q -y --no-modify-path --profile minimal --default-toolchain none
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+
+          cd "$WORKSPACE"
+          "$CARGO_HOME/bin/rustup" --quiet show active-toolchain
+
+      - name: Install the pinned zig
+        run: |
           tarball="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
-          curl -fsSLO "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
-          echo "${ZIG_SHA256}  ${tarball}" | sha256sum -c
-          tar xf "$tarball" -C /opt
+          curl -fsSLo "/tmp/$tarball" "https://ziglang.org/download/${ZIG_VERSION}/${tarball}"
+          echo "${ZIG_SHA256}  /tmp/$tarball" | sha256sum -c -
+          tar xf "/tmp/$tarball" -C /opt
           echo "/opt/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
 
       - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --locked --version "${ZIGBUILD_VERSION}"
+        run: |
+          cd "$WORKSPACE"
+          cargo install cargo-zigbuild --locked --version "$ZIGBUILD_VERSION"
 
       - name: Build
-        run: ./deploy/build.sh
+        run: cd "$WORKSPACE" && ./deploy/build.sh
 
-      - name: Publish the checksum
+      - name: Stage the asset and its checksum
         run: |
-          out=target/x86_64-unknown-linux-musl/release/forgejo-actions-orchestrator
-          {
-            echo '### forgejo-actions-orchestrator-linux-x86_64'
-            echo
-            echo '```'
-            sha256sum "$out"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          cd "$WORKSPACE"
+          rm -rf dist
+          mkdir dist
+          cp "target/x86_64-unknown-linux-musl/release/forgejo-actions-orchestrator" "dist/$ASSET"
+          cd dist
+          sha256sum "$ASSET" | tee "$ASSET.sha256"
 
-      - uses: actions/upload-artifact@v3
-        with:
-          name: forgejo-actions-orchestrator-linux-x86_64
-          path: target/x86_64-unknown-linux-musl/release/forgejo-actions-orchestrator
+      - name: Attach to the release
+        env:
+          RELEASE_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd "$WORKSPACE/dist"
+          api="$FORGEJO_API_URL/repos/$FORGEJO_REPOSITORY"
+          auth="Authorization: token $RELEASE_API_TOKEN"
+
+          id=$(curl -fsS -H "$auth" "$api/releases/tags/$RELEASE_TAG" | jq -er '.id') || {
+            echo "FATAL: no release exists for tag $RELEASE_TAG; create it in Forgejo first" >&2
+            exit 1
+          }
+          echo "release $RELEASE_TAG is id $id"
+
+          for name in "$ASSET" "$ASSET.sha256"; do
+            curl -fsS -H "$auth" "$api/releases/$id/assets" \
+              | jq -r --arg n "$name" '.[] | select(.name == $n) | .id' \
+              | while read -r old; do
+                  echo "replacing $name (attachment $old)"
+                  curl -fsS -X DELETE -H "$auth" "$api/releases/$id/assets/$old"
+                done
+            curl -fsS -H "$auth" -F "attachment=@$name" "$api/releases/$id/assets?name=$name" >/dev/null
+            echo "attached $name"
+          done
