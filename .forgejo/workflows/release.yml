@@ -5,6 +5,7 @@ on:
     inputs:
       tag:
         description: tag to build; its release must already exist
+        type: string
         required: true
 
 concurrency:
