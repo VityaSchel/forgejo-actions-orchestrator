@@ -7,6 +7,13 @@ A daemon watching an allowlist of Forgejo repositories and automatically renting
 | Hetzner Cloud  | image name or snapshot id | Yes       |
 | Vultr          | numeric `os_id`           | No        |
 | Cherry Servers | OS slug                   | No        |
+| Scaleway       | marketplace image label   | No        |
+| Gcore          | image UUID                | No        |
+
+Scaleway and Gcore are zone-scoped: they have no global list endpoint, so the daemon sweeps
+every location their labels name, and a machine id is `<zone>/<uuid>`. Both bill the boot
+volume separately from the instance, so both are created with an explicit size and destroyed
+with the volume.
 
 
 ## Install

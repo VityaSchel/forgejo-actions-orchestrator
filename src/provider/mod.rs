@@ -1,5 +1,7 @@
 mod cherry;
+mod gcore;
 mod hetzner;
+mod scaleway;
 mod vultr;
 
 use std::collections::HashMap;
@@ -40,7 +42,9 @@ pub trait Cloud {
 
 pub enum Backend {
 	Cherry(cherry::Cherry),
+	Gcore(gcore::Gcore),
 	Hetzner(hetzner::Hetzner),
+	Scaleway(scaleway::Scaleway),
 	Vultr(vultr::Vultr),
 }
 
@@ -59,7 +63,15 @@ impl Backend {
 				c.create(name, plan, location, image, ssh_key, user_data)
 					.await
 			}
+			Self::Gcore(c) => {
+				c.create(name, plan, location, image, ssh_key, user_data)
+					.await
+			}
 			Self::Hetzner(c) => {
+				c.create(name, plan, location, image, ssh_key, user_data)
+					.await
+			}
+			Self::Scaleway(c) => {
 				c.create(name, plan, location, image, ssh_key, user_data)
 					.await
 			}
@@ -73,7 +85,9 @@ impl Backend {
 	pub async fn destroy(&self, id: &str) -> Result<()> {
 		match self {
 			Self::Cherry(c) => c.destroy(id).await,
+			Self::Gcore(c) => c.destroy(id).await,
 			Self::Hetzner(c) => c.destroy(id).await,
+			Self::Scaleway(c) => c.destroy(id).await,
 			Self::Vultr(c) => c.destroy(id).await,
 		}
 	}
@@ -81,7 +95,9 @@ impl Backend {
 	pub async fn list(&self, prefix: &str) -> Result<Vec<Machine>> {
 		match self {
 			Self::Cherry(c) => c.list(prefix).await,
+			Self::Gcore(c) => c.list(prefix).await,
 			Self::Hetzner(c) => c.list(prefix).await,
+			Self::Scaleway(c) => c.list(prefix).await,
 			Self::Vultr(c) => c.list(prefix).await,
 		}
 	}
@@ -142,10 +158,17 @@ impl Clouds {
 			if backends.contains_key(&kind) {
 				continue;
 			}
+			let locations = locations_for(labels, kind);
 			let backend = match kind {
 				Kind::Cherry => Backend::Cherry(cherry::Cherry::from_env()?),
+				Kind::Gcore => {
+					Backend::Gcore(gcore::Gcore::from_env(&locations)?)
+				}
 				Kind::Hetzner => {
 					Backend::Hetzner(hetzner::Hetzner::from_env()?)
+				}
+				Kind::Scaleway => {
+					Backend::Scaleway(scaleway::Scaleway::from_env(&locations)?)
 				}
 				Kind::Vultr => Backend::Vultr(vultr::Vultr::from_env()?),
 			};
@@ -159,6 +182,19 @@ impl Clouds {
 			anyhow::anyhow!("no credentials loaded for {kind:?}")
 		})
 	}
+}
+
+/// Zone-scoped APIs have no global list endpoint, so those backends sweep every
+/// location their labels name.
+fn locations_for(labels: &[Label], kind: Kind) -> Vec<String> {
+	let mut locations: Vec<String> = labels
+		.iter()
+		.filter(|label| label.provider == kind)
+		.flat_map(|label| label.locations.iter().cloned())
+		.collect();
+	locations.sort();
+	locations.dedup();
+	locations
 }
 
 pub fn placements(label: &Label) -> impl Iterator<Item = Placement> + '_ {
@@ -246,6 +282,22 @@ mod tests {
 			allow_fork_pull_request: true,
 			allowed_events: vec!["pull_request".into()],
 		}
+	}
+
+	#[test]
+	fn gathers_deduplicated_locations_per_provider() {
+		let mut second = label();
+		second.locations = vec!["nbg1".into(), "hel1".into()];
+		let mut other = label();
+		other.provider = Provider::Vultr;
+		other.locations = vec!["ams".into()];
+		let labels = vec![label(), second, other];
+		assert_eq!(
+			locations_for(&labels, Provider::Hetzner),
+			vec!["fsn1", "hel1", "nbg1"]
+		);
+		assert_eq!(locations_for(&labels, Provider::Vultr), vec!["ams"]);
+		assert!(locations_for(&labels, Provider::Gcore).is_empty());
 	}
 
 	#[test]

@@ -80,3 +80,31 @@ allowed_events = ["push", "workflow_dispatch"]
 # image = "debian_12_64bit"
 # lifetime_minutes = 90
 # allowed_events = ["push", "workflow_dispatch"]
+
+# [[label]]
+# labels = ["build-arm64", "scaleway"]
+# provider = "scaleway"
+#! BASIC2-A8C-16G: 8 arm64 vCPUs (Ampere), 16 GB RAM, EUR 0.1034/hr.
+#! The A6C/A12C/A24C sizes are orderable but no marketplace image is compatible with them.
+# plans = ["BASIC2-A8C-16G"]
+# locations = ["fr-par-1", "fr-par-2", "nl-ams-1"]
+# image = "debian_bookworm"
+# lifetime_minutes = 90
+# allowed_events = ["workflow_dispatch"]
+
+# [[label]]
+# labels = ["build-arm64", "gcore"]
+# provider = "gcore"
+#! a1-standard-8-16: 8 arm64 vCPUs (Ampere), 16 GB RAM, USD 0.106/hr.
+# plans = ["a1-standard-8-16"]
+#! Numeric region ids, not names: 30 is Tokyo. a1-* is not offered in every region.
+# locations = ["30"]
+#! debian-12-generic-arm64-qcow2. Image ids are region-scoped, re-look it up per region.
+# image = "d52b7e87-50f2-4ad0-a5f8-8b9f80591384"
+
+#! Scaleway and Gcore bill the boot volume separately from the instance, from creation until
+#! deletion, and destroy deletes the instance first. If the volume delete then fails the daemon
+#! logs the zone and volume id, but no later sweep can see an orphan: check the provider's block
+#! storage list after any destroy that alerted.
+# lifetime_minutes = 90
+# allowed_events = ["workflow_dispatch"]

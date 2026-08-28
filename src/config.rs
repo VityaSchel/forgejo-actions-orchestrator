@@ -73,7 +73,9 @@ pub struct Label {
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
 	Cherry,
+	Gcore,
 	Hetzner,
+	Scaleway,
 	Vultr,
 }
 
