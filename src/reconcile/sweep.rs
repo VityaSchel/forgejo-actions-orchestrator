@@ -123,7 +123,11 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			}
 			Err(error) => {
 				self.alerts
-					.raise(Kind::SweepFailed, &machine.name, &error.to_string())
+					.raise(
+						Kind::SweepFailed,
+						&machine.name,
+						&format!("{error:#}"),
+					)
 					.await;
 			}
 		}
@@ -146,7 +150,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 				Ok(runners) => runners,
 				Err(error) => {
 					all_repos_listed = false;
-					warn!(%repo, %error, "listing runners failed");
+					warn!(%repo, error = %format!("{error:#}"), "listing runners failed");
 					continue;
 				}
 			};
@@ -176,7 +180,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 						info!(runner = %runner.name, %repo, "deleted orphan runner record")
 					}
 					Err(error) => {
-						warn!(runner = %runner.name, %repo, %error, "deleting orphan runner failed")
+						warn!(runner = %runner.name, %repo, error = %format!("{error:#}"), "deleting orphan runner failed")
 					}
 				}
 			}

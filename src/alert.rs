@@ -88,7 +88,8 @@ impl Alerts {
 			"consecutive": count,
 		});
 		if let Err(error) = self.http.post(url).json(&body).send().await {
-			warn!(%error, "posting alert webhook failed");
+			let error = anyhow::Error::new(error);
+			warn!(error = %format!("{error:#}"), "posting alert webhook failed");
 		}
 	}
 }

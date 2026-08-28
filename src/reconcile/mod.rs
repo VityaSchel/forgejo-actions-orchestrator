@@ -92,7 +92,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 						.raise(
 							Kind::PollFailed,
 							&repo.to_string(),
-							&error.to_string(),
+							&format!("{error:#}"),
 						)
 						.await;
 				}
@@ -120,7 +120,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 						.raise(
 							Kind::PollFailed,
 							&format!("{kind:?}"),
-							&error.to_string(),
+							&format!("{error:#}"),
 						)
 						.await;
 				}
@@ -143,7 +143,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			.set_status(repo, sha, state, STATUS_CONTEXT, description, run_url)
 			.await
 		{
-			warn!(%error, "posting commit status failed");
+			warn!(error = %format!("{error:#}"), "posting commit status failed");
 		}
 	}
 }

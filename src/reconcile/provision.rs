@@ -41,7 +41,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 					.raise(
 						Kind::CreateFailed,
 						&entry.job.handle,
-						&error.to_string(),
+						&format!("{error:#}"),
 					)
 					.await;
 			}
@@ -141,7 +141,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 				if let Err(cleanup) =
 					self.forgejo.delete_runner(repo, registration.id).await
 				{
-					warn!(%cleanup, "could not delete the runner of a failed placement");
+					warn!(cleanup = %format!("{cleanup:#}"), "could not delete the runner of a failed placement");
 				}
 				self.report(
 					repo,
@@ -199,7 +199,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 					))
 				}
 				Err(error) => {
-					warn!(machine = %name, plan = %placement.plan, location = %placement.location, %error, "placement rejected");
+					warn!(machine = %name, plan = %placement.plan, location = %placement.location, error = %format!("{error:#}"), "placement rejected");
 					last = Some(error);
 				}
 			}
