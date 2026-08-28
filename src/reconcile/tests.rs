@@ -486,6 +486,27 @@ async fn keeps_a_runner_whose_machine_the_provider_never_listed() {
 }
 
 #[tokio::test]
+async fn does_not_provision_again_when_a_listing_drops_a_machine_it_showed() {
+	let queue = FakeQueue {
+		jobs: Ok(vec![job("flap")]),
+		..Default::default()
+	};
+	let mut orc = orchestrator(queue, FakeFleet::with(vec![]));
+
+	orc.tick().await;
+	orc.clouds.machines = vec![machine("flap")];
+	orc.tick().await;
+	orc.clouds.machines = vec![];
+	orc.tick().await;
+
+	assert_eq!(
+		orc.clouds.created.lock().unwrap().len(),
+		1,
+		"a listing that forgets a machine it already showed is not a missing machine"
+	);
+}
+
+#[tokio::test]
 async fn destroys_a_machine_its_provider_never_listed() {
 	let stranded = aged_machine("stranded", 600);
 	let mut orc = orchestrator(FakeQueue::default(), FakeFleet::with(vec![]));

@@ -100,12 +100,12 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			.iter()
 			.map(|(_, machine)| machine.name.as_str())
 			.collect();
-		self.unseen
-			.retain(|name, _| !listed.contains(name.as_str()));
 
 		let stale: Vec<(Provider, Machine)> = self
 			.unseen
-			.values()
+			.iter()
+			.filter(|(name, _)| !listed.contains(name.as_str()))
+			.map(|(_, entry)| entry)
 			.filter(|(kind, _)| !survey.blind.contains(kind))
 			.cloned()
 			.collect();
@@ -150,6 +150,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		match outcome {
 			Ok(()) => {
 				info!(machine = %machine.name, "destroyed");
+				self.unseen.remove(&machine.name);
 				self.first_seen.remove(&machine.name);
 				self.missed_polls.remove(&machine.name);
 				self.alerts.clear(Kind::SweepFailed, &machine.name);
