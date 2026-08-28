@@ -50,8 +50,6 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @obsolete @mount @debug @cpu-emulation @module @raw-io @reboot @swap @clock
-# Only outbound calls
-SocketBindDeny=any
 # No IPAddressAllow: an allow entry is matched first and would nullify this deny
 # Needs cgroup v2 + eBPF
 IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128
