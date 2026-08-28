@@ -25,4 +25,4 @@ Install zig from the [official tarball](https://ziglang.org/download/), not from
 # -> target/x86_64-unknown-linux-musl/release/forgejo-actions-orchestrator
 ```
 
-The hash reproduces on a given host OS, not across them. Released binaries therefore come from the `Release` workflow, run manually in [Actions](https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases).
+The hash reproduces on a given host OS, not across them. Released binaries therefore come from the `Release` workflow in [Actions](https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases).

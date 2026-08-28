@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -9,7 +11,7 @@ on:
         required: true
 
 concurrency:
-  group: orchestrator-release-${{ forgejo.event.inputs.tag }}
+  group: orchestrator-release-${{ forgejo.event.inputs.tag || forgejo.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -26,7 +28,7 @@ jobs:
           -u ACTIONS_CACHE_URL -u ACTIONS_RUNTIME_URL -u ACTIONS_RESULTS_URL
           bash --noprofile --norc -e -o pipefail {0}
     env:
-      RELEASE_TAG: ${{ forgejo.event.inputs.tag }}
+      RELEASE_TAG: ${{ forgejo.event.inputs.tag || forgejo.event.release.tag_name }}
       ASSET: forgejo-actions-orchestrator-linux-x86_64
       WORKSPACE: /opt/orchestrator-release
       CARGO_HOME: /opt/rust/cargo
