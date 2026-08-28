@@ -14,7 +14,8 @@ name = "example"
 poll_interval_secs = 15
 reconcile_grace_secs = 300
 runner_version = "12.13.2"
-runner_sha256 = "2b4c3751fc2f9a60f753ef97414949de25587dfa2b921870b0cb6cb7c9bf7080"
+runner_sha256_amd64 = "2b4c3751fc2f9a60f753ef97414949de25587dfa2b921870b0cb6cb7c9bf7080"
+runner_sha256_arm64 = "21ae372961bc96b68ac91ceafb6bb1b0ea2493c22ffe24988f7cf578f5fbe58f"
 
 #! Optional. POST {kind, subject, detail, consecutive}
 # [alert]

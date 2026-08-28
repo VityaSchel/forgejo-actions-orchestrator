@@ -13,8 +13,14 @@ if [ ${#missing[@]} -gt 0 ]; then
 	apt-get install -y ca-certificates "${missing[@]}"
 fi
 
-curl -fsSL -o "$runner" "$(cat "$etc/runner-url")"
-sha256sum -c "$etc/runner.sha256"
+case "$(uname -m)" in
+x86_64) arch=amd64 ;;
+aarch64) arch=arm64 ;;
+*) echo "no runner build pinned for $(uname -m)" >&2; exit 1 ;;
+esac
+
+curl -fsSL -o "$runner" "$(cat "$etc/runner-url-$arch")"
+sha256sum -c "$etc/runner-$arch.sha256"
 chmod +x "$runner"
 
 labels=()

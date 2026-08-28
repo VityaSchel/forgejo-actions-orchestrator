@@ -46,7 +46,8 @@ pub struct Daemon {
 	#[serde(default = "default_reconcile_grace")]
 	pub reconcile_grace_secs: u64,
 	pub runner_version: String,
-	pub runner_sha256: String,
+	pub runner_sha256_amd64: String,
+	pub runner_sha256_arm64: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -127,10 +128,12 @@ impl Config {
 			bail!("no [[label]] entries: the orchestrator would never provision anything");
 		}
 		if self.daemon.runner_version.is_empty()
-			|| self.daemon.runner_sha256.is_empty()
+			|| self.daemon.runner_sha256_amd64.is_empty()
+			|| self.daemon.runner_sha256_arm64.is_empty()
 		{
 			bail!(
-				"daemon.runner_version and daemon.runner_sha256 are required"
+				"daemon.runner_version, daemon.runner_sha256_amd64 and \
+				 daemon.runner_sha256_arm64 are required"
 			);
 		}
 		let mut seen = HashSet::new();

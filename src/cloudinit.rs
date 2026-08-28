@@ -54,6 +54,13 @@ impl WriteFile {
 	}
 }
 
+fn runner_url(version: &str, arch: &str) -> String {
+	format!(
+		"https://code.forgejo.org/forgejo/runner/releases/download/\
+		 v{version}/forgejo-runner-{version}-linux-{arch}"
+	)
+}
+
 pub fn render(
 	daemon: &Daemon,
 	label: &Label,
@@ -63,42 +70,48 @@ pub fn render(
 ) -> String {
 	let version = &daemon.runner_version;
 	let config = CloudConfig {
-        write_files: vec![
-            WriteFile::secret("runner-token", registration.token.clone()),
-            WriteFile::script("boot.sh", BOOT.to_owned()),
-            WriteFile::readable("forgejo-url", forgejo_url.to_owned()),
-            WriteFile::readable("runner-uuid", registration.uuid.clone()),
-            WriteFile::readable(
-                "runner-labels",
-                label
-                    .labels
-                    .iter()
-                    .map(|one| format!("{one}:host\n"))
-                    .collect::<String>(),
-            ),
-            WriteFile::readable("job-handle", handle.to_owned()),
-            WriteFile::readable(
-                "runner-config.yml",
-                format!("runner:\n  timeout: {}m\n", label.job_timeout()),
-            ),
-            WriteFile::readable(
-                "runner-url",
-                format!(
-                    "https://code.forgejo.org/forgejo/runner/releases/download/v{version}/forgejo-runner-{version}-linux-amd64"
-                ),
-            ),
-            WriteFile::readable(
-                "runner.sha256",
-                format!("{}  {RUNNER_PATH}\n", daemon.runner_sha256),
-            ),
-        ],
-        runcmd: vec![vec!["bash".to_owned(), format!("{ETC}/boot.sh")]],
-        power_state: PowerState {
-            mode: "poweroff",
-            delay: label.lifetime_minutes,
-            condition: true,
-        },
-    };
+		write_files: vec![
+			WriteFile::secret("runner-token", registration.token.clone()),
+			WriteFile::script("boot.sh", BOOT.to_owned()),
+			WriteFile::readable("forgejo-url", forgejo_url.to_owned()),
+			WriteFile::readable("runner-uuid", registration.uuid.clone()),
+			WriteFile::readable(
+				"runner-labels",
+				label
+					.labels
+					.iter()
+					.map(|one| format!("{one}:host\n"))
+					.collect::<String>(),
+			),
+			WriteFile::readable("job-handle", handle.to_owned()),
+			WriteFile::readable(
+				"runner-config.yml",
+				format!("runner:\n  timeout: {}m\n", label.job_timeout()),
+			),
+			WriteFile::readable(
+				"runner-url-amd64",
+				runner_url(version, "amd64"),
+			),
+			WriteFile::readable(
+				"runner-url-arm64",
+				runner_url(version, "arm64"),
+			),
+			WriteFile::readable(
+				"runner-amd64.sha256",
+				format!("{}  {RUNNER_PATH}\n", daemon.runner_sha256_amd64),
+			),
+			WriteFile::readable(
+				"runner-arm64.sha256",
+				format!("{}  {RUNNER_PATH}\n", daemon.runner_sha256_arm64),
+			),
+		],
+		runcmd: vec![vec!["bash".to_owned(), format!("{ETC}/boot.sh")]],
+		power_state: PowerState {
+			mode: "poweroff",
+			delay: label.lifetime_minutes,
+			condition: true,
+		},
+	};
 
 	format!(
 		"#cloud-config\n{}\n",
@@ -117,7 +130,8 @@ mod tests {
 			poll_interval_secs: 15,
 			reconcile_grace_secs: 300,
 			runner_version: "12.13.2".into(),
-			runner_sha256: "deadbeef".into(),
+			runner_sha256_amd64: "deadbeef".into(),
+			runner_sha256_arm64: "cafebabe".into(),
 		}
 	}
 
@@ -323,11 +337,21 @@ mod tests {
 			"runner-labels",
 			"job-handle",
 			"runner-token",
-			"runner-url",
-			"runner.sha256",
+			"runner-url-amd64",
+			"runner-url-arm64",
+			"runner-amd64.sha256",
+			"runner-arm64.sha256",
 			"runner-config.yml",
 		] {
-			assert!(BOOT.contains(name), "{name} is written but never read");
+			let read = name
+				.replace("-amd64", "-$arch")
+				.replace("-arm64", "-$arch")
+				.replace("amd64.sha256", "$arch.sha256")
+				.replace("arm64.sha256", "$arch.sha256");
+			assert!(
+				BOOT.contains(&read),
+				"{name} is written but never read as {read}"
+			);
 			file(&config, name);
 		}
 	}
@@ -353,8 +377,18 @@ mod tests {
 	fn verifies_the_runner_download() {
 		let config = rendered(&registration(), "H1");
 		assert_eq!(
-			file(&config, "runner.sha256")["content"],
+			file(&config, "runner-amd64.sha256")["content"],
 			format!("deadbeef  {RUNNER_PATH}\n")
+		);
+		assert_eq!(
+			file(&config, "runner-arm64.sha256")["content"],
+			format!("cafebabe  {RUNNER_PATH}\n")
+		);
+		assert!(
+			file(&config, "runner-url-arm64")["content"]
+				.as_str()
+				.is_some_and(|url| url.ends_with("-linux-arm64")),
+			"the arm64 box must not be sent the amd64 build"
 		);
 		assert!(BOOT.contains("sha256sum -c"), "{BOOT}");
 	}
