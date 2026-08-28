@@ -40,6 +40,26 @@ struct Pagination {
 }
 
 #[derive(Deserialize)]
+struct ServerTypes {
+	server_types: Vec<ServerType>,
+}
+
+#[derive(Deserialize)]
+struct ServerType {
+	architecture: String,
+}
+
+#[derive(Deserialize)]
+struct Images {
+	images: Vec<Image>,
+}
+
+#[derive(Deserialize)]
+struct Image {
+	id: i64,
+}
+
+#[derive(Deserialize)]
 struct Server {
 	id: i64,
 	name: String,
@@ -58,6 +78,52 @@ impl Hetzner {
 	fn auth(&self) -> String {
 		format!("Bearer {}", self.token)
 	}
+
+	async fn architecture_of(&self, plan: &str) -> Result<String> {
+		let response = self
+			.http
+			.get(format!("{API}/server_types"))
+			.query(&[("name", plan)])
+			.header("Authorization", self.auth())
+			.send()
+			.await
+			.context("hetzner: reading server type")?;
+		let listed: ServerTypes =
+			super::decode(response, "hetzner: reading server type").await?;
+		listed
+			.server_types
+			.into_iter()
+			.next()
+			.map(|server_type| server_type.architecture)
+			.with_context(|| format!("hetzner: unknown server type {plan}"))
+	}
+
+	/// One image name covers both architectures under different ids, and the API
+	/// picks neither: https://docs.hetzner.cloud/#images-get-all-images
+	async fn image_for(&self, image: &str, plan: &str) -> Result<Value> {
+		if let Ok(id) = image.parse::<i64>() {
+			return Ok(json!(id));
+		}
+		let architecture = self.architecture_of(plan).await?;
+		let response = self
+			.http
+			.get(format!("{API}/images"))
+			.query(&[("name", image), ("architecture", &architecture)])
+			.header("Authorization", self.auth())
+			.send()
+			.await
+			.context("hetzner: resolving image")?;
+		let listed: Images =
+			super::decode(response, "hetzner: resolving image").await?;
+		listed
+			.images
+			.into_iter()
+			.next()
+			.map(|found| json!(found.id))
+			.with_context(|| {
+				format!("hetzner: no {architecture} image named {image}")
+			})
+	}
 }
 
 impl Cloud for Hetzner {
@@ -74,7 +140,7 @@ impl Cloud for Hetzner {
 			"name": name,
 			"server_type": plan,
 			"location": location,
-			"image": image_by_id_or_name(image),
+			"image": self.image_for(image, plan).await?,
 			"user_data": user_data,
 			"start_after_create": true,
 		});
@@ -153,25 +219,25 @@ impl Cloud for Hetzner {
 	}
 }
 
-/// Hetzner accepts an image by numeric id or by name, and rejects a numeric id sent as a string.
-fn image_by_id_or_name(image: &str) -> Value {
-	match image.parse::<i64>() {
-		Ok(id) => json!(id),
-		Err(_) => json!(image),
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	#[test]
-	fn sends_a_numeric_image_as_a_number() {
-		assert_eq!(image_by_id_or_name("12345"), json!(12345));
+	fn reads_the_architecture_of_a_server_type() {
+		let listed: ServerTypes = serde_json::from_value(json!({
+			"server_types": [{ "name": "cax31", "architecture": "arm" }],
+		}))
+		.unwrap();
+		assert_eq!(listed.server_types[0].architecture, "arm");
 	}
 
 	#[test]
-	fn sends_a_named_image_as_a_string() {
-		assert_eq!(image_by_id_or_name("debian-12"), json!("debian-12"));
+	fn reads_the_id_of_a_resolved_image() {
+		let listed: Images = serde_json::from_value(json!({
+			"images": [{ "id": 114690389, "name": "debian-12" }],
+		}))
+		.unwrap();
+		assert_eq!(listed.images[0].id, 114690389);
 	}
 }
