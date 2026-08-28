@@ -61,15 +61,41 @@ struct Listed {
 
 /// Older v1 payloads name these instance_*: https://docs.gcore.com/api-reference/cloud/instances/list-instances
 #[derive(Deserialize)]
+/// instance_* fields are legacy variants
 struct Instance {
-	#[serde(alias = "instance_id")]
-	id: String,
-	#[serde(default, alias = "instance_name")]
-	name: String,
-	#[serde(default, alias = "instance_created")]
+	#[serde(default)]
+	id: Option<String>,
+	#[serde(default)]
+	instance_id: Option<String>,
+	#[serde(default)]
+	name: Option<String>,
+	#[serde(default)]
+	instance_name: Option<String>,
+	#[serde(default)]
 	created_at: Option<String>,
 	#[serde(default)]
+	instance_created: Option<String>,
+	#[serde(default)]
 	volumes: Vec<Volume>,
+}
+
+impl Instance {
+	fn id(&self) -> Option<&str> {
+		self.id.as_deref().or(self.instance_id.as_deref())
+	}
+
+	fn name(&self) -> &str {
+		self.name
+			.as_deref()
+			.or(self.instance_name.as_deref())
+			.unwrap_or_default()
+	}
+
+	fn created_at(&self) -> Option<&str> {
+		self.created_at
+			.as_deref()
+			.or(self.instance_created.as_deref())
+	}
 }
 
 #[derive(Deserialize)]
@@ -266,14 +292,15 @@ impl Cloud for Gcore {
 				listed
 					.results
 					.into_iter()
-					.filter(|found| found.name.starts_with(prefix))
-					.map(|found| Machine {
-						id: machine_id(region, &found.id),
-						name: found.name,
-						created_at: found
-							.created_at
-							.as_deref()
-							.and_then(super::timestamp),
+					.filter(|found| found.name().starts_with(prefix))
+					.filter_map(|found| {
+						Some(Machine {
+							id: machine_id(region, found.id()?),
+							name: found.name().to_owned(),
+							created_at: found
+								.created_at()
+								.and_then(super::timestamp),
+						})
 					}),
 			);
 		}
@@ -493,6 +520,32 @@ mod tests {
 	}
 
 	#[test]
+	fn reads_a_listing_that_repeats_every_field_under_a_legacy_key() {
+		let listed: Listed = serde_json::from_value(json!({
+			"count": 1,
+			"results": [{
+				"id": "189402ab-8c05-48fa-b043-0fc58409539b",
+				"instance_id": "189402ab-8c05-48fa-b043-0fc58409539b",
+				"name": "ci-orc-build-arm64-gcore-84334600",
+				"instance_name": "ci-orc-build-arm64-gcore-84334600",
+				"created_at": "2026-08-28T10:45:21Z",
+				"instance_created": "2026-08-28T10:45:21Z",
+				"status": "ACTIVE",
+				"volumes": [{
+					"id": "989a2ea6-a715-416e-97f9-a57898ae291b",
+					"delete_on_termination": true,
+				}],
+			}],
+		}))
+		.unwrap();
+		let found = &listed.results[0];
+		assert_eq!(found.id(), Some("189402ab-8c05-48fa-b043-0fc58409539b"));
+		assert_eq!(found.name(), "ci-orc-build-arm64-gcore-84334600");
+		assert_eq!(found.created_at(), Some("2026-08-28T10:45:21Z"));
+		assert_eq!(found.volumes[0].id, "989a2ea6-a715-416e-97f9-a57898ae291b");
+	}
+
+	#[test]
 	fn reads_the_instance_id_out_of_a_finished_task() {
 		let task: Task = serde_json::from_value(json!({
 			"state": "FINISHED",
@@ -527,8 +580,8 @@ mod tests {
 			"instance_created": "2026-08-27T10:00:00Z",
 		}))
 		.unwrap();
-		assert_eq!(current.id, legacy.id);
-		assert_eq!(current.name, legacy.name);
-		assert_eq!(current.created_at, legacy.created_at);
+		assert_eq!(current.id(), legacy.id());
+		assert_eq!(current.name(), legacy.name());
+		assert_eq!(current.created_at(), legacy.created_at());
 	}
 }
