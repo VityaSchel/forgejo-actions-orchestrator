@@ -206,6 +206,25 @@ fn orchestrator(
 	)
 }
 
+#[test]
+fn logs_a_stable_refusal_once_and_again_after_it_settles() {
+	let mut orc = orchestrator(FakeQueue::default(), FakeFleet::with(vec![]));
+	assert!(orc.refusals.is_empty());
+
+	orc.log_refusal("h1", "label build-hetzner already has 1 machine(s)");
+	orc.log_refusal("h1", "label build-hetzner already has 1 machine(s)");
+	assert_eq!(orc.refusals.len(), 1, "a repeat must not re-log");
+
+	orc.log_refusal("h1", "a different reason");
+	assert_eq!(orc.refusals["h1"], "a different reason");
+
+	orc.forget_settled_refusals(&[]);
+	assert!(
+		orc.refusals.is_empty(),
+		"a handle that left the queue must log again if it returns"
+	);
+}
+
 #[tokio::test]
 async fn destroys_a_machine_whose_job_left_the_queue() {
 	let queue = FakeQueue {

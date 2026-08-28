@@ -68,7 +68,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		let label = match policy::resolve(&self.config, &request) {
 			Ok(label) => label.clone(),
 			Err(denial) => {
-				info!(handle = %job.handle, %denial, "refused");
+				self.log_refusal(&job.handle, &denial.to_string());
 				self.report(
 					repo,
 					&sha,
@@ -85,7 +85,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			+ pending.get(&label.name()).copied().unwrap_or(0);
 		if let Err(denial) = policy::admit(&label, &request, live) {
 			{
-				info!(handle = %job.handle, %denial, "refused");
+				self.log_refusal(&job.handle, &denial.to_string());
 				self.report(
 					repo,
 					&sha,
@@ -154,6 +154,23 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 				Err(error)
 			}
 		}
+	}
+
+	pub(super) fn log_refusal(&mut self, handle: &str, denial: &str) {
+		if self.refusals.get(handle).is_some_and(|last| last == denial) {
+			return;
+		}
+		info!(%handle, %denial, "refused");
+		self.refusals.insert(handle.to_owned(), denial.to_owned());
+	}
+
+	pub(super) fn forget_settled_refusals(&mut self, queued: &[Queued]) {
+		let live: HashSet<&str> = queued
+			.iter()
+			.map(|entry| entry.job.handle.as_str())
+			.collect();
+		self.refusals
+			.retain(|handle, _| live.contains(handle.as_str()));
 	}
 
 	fn live_for_label(
