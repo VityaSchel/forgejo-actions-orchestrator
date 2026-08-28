@@ -127,6 +127,7 @@ mod tests {
 
 	fn daemon() -> Daemon {
 		Daemon {
+			machine_prefix: crate::naming::DEFAULT_PREFIX.to_owned(),
 			poll_interval_secs: 15,
 			reconcile_grace_secs: 300,
 			runner_version: "12.13.2".into(),

@@ -27,12 +27,13 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		survey: &Survey,
 		labels: &[String],
 	) {
+		let prefix = self.config.machine_prefix().to_owned();
 		let live: HashSet<String> = queued
 			.iter()
 			.map(|entry| naming::truncated_handle(&entry.job.handle))
 			.collect();
 		for (kind, machine) in &survey.fleet {
-			match naming::split(&machine.name, labels) {
+			match naming::split(&prefix, &machine.name, labels) {
 				Some((_, handle)) if live.contains(handle) => {
 					self.missed_polls.remove(&machine.name);
 					continue;
@@ -126,7 +127,8 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 	}
 
 	fn lifetime_of(&self, name: &str, labels: &[String]) -> Option<Duration> {
-		let (label, _) = naming::split(name, labels)?;
+		let (label, _) =
+			naming::split(self.config.machine_prefix(), name, labels)?;
 		let label = self.config.label(label)?;
 		Some(
 			Duration::from_secs(label.lifetime_minutes * 60)
@@ -180,6 +182,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			.map(|(_, machine)| machine.name.clone())
 			.collect();
 		alive.extend(self.unseen.keys().cloned());
+		let prefix = self.config.machine_prefix().to_owned();
 		let repos = self.config.repos.clone();
 		let mut seen: HashSet<String> = HashSet::new();
 		let mut all_repos_listed = true;
@@ -193,7 +196,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 				}
 			};
 			for runner in runners {
-				if !runner.name.starts_with(naming::PREFIX) {
+				if !runner.name.starts_with(&prefix) {
 					continue;
 				}
 				seen.insert(runner.name.clone());

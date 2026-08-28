@@ -48,6 +48,8 @@ pub struct Daemon {
 	pub runner_version: String,
 	pub runner_sha256_amd64: String,
 	pub runner_sha256_arm64: String,
+	#[serde(default = "default_machine_prefix")]
+	pub machine_prefix: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -82,6 +84,10 @@ pub enum Provider {
 
 const HOSTNAME_LIMIT: usize = 63;
 
+fn default_machine_prefix() -> String {
+	crate::naming::DEFAULT_PREFIX.to_owned()
+}
+
 fn default_poll_interval() -> u64 {
 	15
 }
@@ -112,6 +118,18 @@ impl Config {
 	}
 
 	fn validate(&self) -> Result<()> {
+		let prefix = self.machine_prefix();
+		if prefix.is_empty()
+			|| !prefix.starts_with(|c: char| {
+				c.is_ascii_lowercase() || c.is_ascii_digit()
+			}) || prefix.ends_with('-')
+			|| !prefix.chars().all(|c| {
+				c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'
+			}) {
+			bail!(
+				"machine_prefix {prefix:?} must be a hostname label: lower case letters, digits and hyphens, starting with a letter or digit and not ending in a hyphen"
+			);
+		}
 		if self.repos.is_empty() {
 			bail!("no [[repo]] entries: the orchestrator would watch nothing");
 		}
@@ -179,17 +197,25 @@ impl Config {
 					);
 				}
 			}
-			let longest =
-				crate::naming::machine_name(&label.name(), &"0".repeat(36));
+			let longest = crate::naming::machine_name(
+				self.machine_prefix(),
+				&label.name(),
+				&"0".repeat(36),
+			);
 			if longest.len() > HOSTNAME_LIMIT {
 				bail!(
-                    "label {} makes a {}-character machine name, over the {HOSTNAME_LIMIT} hostname limit",
+                    "machine_prefix {} and label {} make a {}-character machine name, over the {HOSTNAME_LIMIT} hostname limit",
+                    self.machine_prefix(),
                     label.name(),
                     longest.len()
                 );
 			}
 		}
 		Ok(())
+	}
+
+	pub fn machine_prefix(&self) -> &str {
+		&self.daemon.machine_prefix
 	}
 
 	pub fn label(&self, name: &str) -> Option<&Label> {
@@ -251,6 +277,11 @@ mod tests {
 	const EXAMPLE: &str = include_str!("../config.example.toml");
 
 	mod invalid {
+		pub const MACHINE_PREFIX_TOO_LONG: &str =
+			include_str!("../fixtures/invalid/machine-prefix-too-long.toml");
+		pub const MACHINE_PREFIX_NOT_A_HOSTNAME: &str = include_str!(
+			"../fixtures/invalid/machine-prefix-not-a-hostname.toml"
+		);
 		pub const NO_REPOS: &str =
 			include_str!("../fixtures/invalid/no-repos.toml");
 		pub const DUPLICATE_REPO: &str =
@@ -321,6 +352,28 @@ mod tests {
 	#[test]
 	fn the_shipped_example_is_valid() {
 		Config::parse(EXAMPLE).unwrap();
+	}
+
+	#[test]
+	fn defaults_the_machine_prefix() {
+		let config = Config::parse(VALID).unwrap();
+		assert_eq!(config.machine_prefix(), crate::naming::DEFAULT_PREFIX);
+	}
+
+	#[test]
+	fn rejects_a_machine_prefix_that_overflows_the_hostname_limit() {
+		rejects(
+			invalid::MACHINE_PREFIX_TOO_LONG,
+			"over the 63 hostname limit",
+		);
+	}
+
+	#[test]
+	fn rejects_a_machine_prefix_that_is_not_a_hostname_label() {
+		rejects(
+			invalid::MACHINE_PREFIX_NOT_A_HOSTNAME,
+			"must be a hostname label",
+		);
 	}
 
 	#[test]

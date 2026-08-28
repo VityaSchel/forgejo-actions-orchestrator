@@ -6,7 +6,6 @@ use tracing::warn;
 use crate::alert::{Alerts, Kind};
 use crate::config::{Config, Provider, Repo};
 use crate::forgejo::{Job, Queue, StatusState};
-use crate::naming;
 use crate::provider::{Fleet, Machine};
 
 mod provision;
@@ -109,10 +108,11 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 
 	async fn survey(&mut self) -> Survey {
 		let kinds: Vec<Provider> = self.clouds.kinds();
+		let prefix = self.config.machine_prefix().to_owned();
 		let mut fleet = Machines::new();
 		let mut blind = HashSet::new();
 		for kind in kinds {
-			let listed = self.clouds.list(kind, naming::PREFIX).await;
+			let listed = self.clouds.list(kind, &prefix).await;
 			match listed {
 				Ok(machines) => {
 					self.alerts.clear(Kind::PollFailed, &format!("{kind:?}"));

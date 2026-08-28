@@ -20,15 +20,18 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		survey: &Survey,
 		names: &[String],
 	) {
+		let prefix = self.config.machine_prefix().to_owned();
 		let mut served: HashSet<String> = survey
 			.fleet
 			.iter()
 			.filter_map(|(_, machine)| {
-				naming::split(&machine.name, names).map(|(_, h)| h.to_owned())
+				naming::split(&prefix, &machine.name, names)
+					.map(|(_, h)| h.to_owned())
 			})
 			.collect();
 		served.extend(self.unseen.keys().filter_map(|name| {
-			naming::split(name, names).map(|(_, handle)| handle.to_owned())
+			naming::split(&prefix, name, names)
+				.map(|(_, handle)| handle.to_owned())
 		}));
 
 		let mut pending: HashMap<String, usize> = HashMap::new();
@@ -115,7 +118,11 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		)
 		.await;
 
-		let name = naming::machine_name(&label.name(), &job.handle);
+		let name = naming::machine_name(
+			self.config.machine_prefix(),
+			&label.name(),
+			&job.handle,
+		);
 		let registration = self.forgejo.register_runner(repo, &name).await?;
 		let user_data = cloudinit::render(
 			&self.config.daemon,
@@ -187,8 +194,12 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		fleet
 			.iter()
 			.filter(|(_, machine)| {
-				naming::split(&machine.name, names)
-					.is_some_and(|(label, _)| label == name)
+				naming::split(
+					self.config.machine_prefix(),
+					&machine.name,
+					names,
+				)
+				.is_some_and(|(label, _)| label == name)
 			})
 			.count()
 	}

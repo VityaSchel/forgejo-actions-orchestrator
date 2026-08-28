@@ -7,6 +7,7 @@ use crate::config::{Provider, Repo};
 use crate::forgejo::{Job, Registration, Run, Runner};
 use time::OffsetDateTime;
 
+use crate::naming;
 use crate::provider::Machine;
 
 const CONFIG: &str = include_str!("../../fixtures/config.toml");
@@ -180,7 +181,7 @@ fn labelled_job(handle: &str, label: &str) -> Job {
 fn machine(handle: &str) -> Machine {
 	Machine {
 		id: format!("id-{handle}"),
-		name: naming::machine_name("check", handle),
+		name: naming::machine_name(naming::DEFAULT_PREFIX, "check", handle),
 		created_at: Some(OffsetDateTime::now_utc()),
 	}
 }
@@ -293,7 +294,7 @@ async fn destroys_a_machine_no_label_explains() {
 	};
 	let orphan = Machine {
 		id: "id-orphan".into(),
-		name: format!("{}-renamed-label-abc", naming::PREFIX),
+		name: format!("{}-renamed-label-abc", naming::DEFAULT_PREFIX),
 		created_at: Some(OffsetDateTime::now_utc()),
 	};
 	let fleet = FakeFleet::with(vec![orphan]);
@@ -318,7 +319,7 @@ async fn provisions_for_a_queued_job() {
 	orc.tick().await;
 	assert_eq!(
 		orc.clouds.created.lock().unwrap().as_slice(),
-		[naming::machine_name("check", "new")]
+		[naming::machine_name(naming::DEFAULT_PREFIX, "check", "new")]
 	);
 }
 
@@ -371,7 +372,11 @@ async fn deletes_a_runner_record_with_no_machine() {
 		jobs: Ok(vec![]),
 		runners: vec![Runner {
 			id: 42,
-			name: naming::machine_name("check", "vanished"),
+			name: naming::machine_name(
+				naming::DEFAULT_PREFIX,
+				"check",
+				"vanished",
+			),
 			ephemeral: true,
 		}],
 		..Default::default()
@@ -389,7 +394,7 @@ async fn deletes_a_runner_record_with_no_machine() {
 
 #[tokio::test]
 async fn keeps_a_runner_whose_machine_the_provider_has_not_listed_yet() {
-	let name = naming::machine_name("check", "fresh");
+	let name = naming::machine_name(naming::DEFAULT_PREFIX, "check", "fresh");
 	let queue = FakeQueue {
 		jobs: Ok(vec![]),
 		runners: vec![Runner {
@@ -417,7 +422,8 @@ async fn keeps_a_runner_whose_machine_the_provider_has_not_listed_yet() {
 
 #[tokio::test]
 async fn keeps_a_runner_whose_provider_lists_the_machine_minutes_late() {
-	let name = naming::machine_name("check", "slowlist");
+	let name =
+		naming::machine_name(naming::DEFAULT_PREFIX, "check", "slowlist");
 	let queue = FakeQueue {
 		jobs: Ok(vec![]),
 		runners: vec![Runner {
@@ -590,8 +596,8 @@ async fn provisions_for_every_allowlisted_repository() {
 	assert_eq!(
 		created,
 		vec![
-			naming::machine_name("roomy", "A"),
-			naming::machine_name("roomy", "B")
+			naming::machine_name(naming::DEFAULT_PREFIX, "roomy", "A"),
+			naming::machine_name(naming::DEFAULT_PREFIX, "roomy", "B")
 		]
 	);
 }
@@ -610,7 +616,7 @@ async fn registers_the_runner_in_the_repository_that_asked_for_it() {
 		*orchestrator.forgejo.registered.lock().unwrap(),
 		vec![(
 			"acme/gadgets".to_string(),
-			naming::machine_name("check", "B")
+			naming::machine_name(naming::DEFAULT_PREFIX, "check", "B")
 		)]
 	);
 }
@@ -643,7 +649,7 @@ async fn provisions_once_for_a_handle_listed_twice() {
 
 	assert_eq!(
 		*orchestrator.clouds.created.lock().unwrap(),
-		vec![naming::machine_name("check", "A")]
+		vec![naming::machine_name(naming::DEFAULT_PREFIX, "check", "A")]
 	);
 }
 
