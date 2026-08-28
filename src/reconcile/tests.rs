@@ -441,6 +441,64 @@ async fn keeps_a_runner_whose_provider_lists_the_machine_minutes_late() {
 }
 
 #[tokio::test]
+async fn destroys_a_machine_its_provider_never_listed() {
+	let stranded = aged_machine("stranded", 600);
+	let mut orc = orchestrator(FakeQueue::default(), FakeFleet::with(vec![]));
+	orc.unseen
+		.insert(stranded.name.clone(), (Provider::Hetzner, stranded.clone()));
+
+	orc.tick().await;
+
+	assert_eq!(
+		orc.clouds.destroyed.lock().unwrap().as_slice(),
+		["id-stranded"]
+	);
+	assert!(
+		orc.unseen.is_empty(),
+		"a destroyed machine must not be retried"
+	);
+}
+
+#[tokio::test]
+async fn forgets_a_created_machine_once_a_listing_shows_it() {
+	let seen = aged_machine("seen", 600);
+	let mut orc =
+		orchestrator(FakeQueue::default(), FakeFleet::with(vec![seen.clone()]));
+	orc.unseen
+		.insert(seen.name.clone(), (Provider::Hetzner, seen.clone()));
+
+	orc.tick().await;
+
+	assert!(
+		orc.unseen.is_empty(),
+		"a listed machine belongs to the normal sweeps, not this one"
+	);
+	assert_eq!(
+		orc.clouds.destroyed.lock().unwrap().len(),
+		1,
+		"the overdue sweep destroys it once, not twice"
+	);
+}
+
+#[tokio::test]
+async fn keeps_an_unlisted_machine_while_its_provider_is_blind() {
+	let stranded = aged_machine("blind", 600);
+	let mut fleet = FakeFleet::with(vec![]);
+	fleet.list_fails = true;
+	let mut orc = orchestrator(FakeQueue::default(), fleet);
+	orc.unseen
+		.insert(stranded.name.clone(), (Provider::Hetzner, stranded.clone()));
+
+	orc.tick().await;
+
+	assert!(
+		orc.clouds.destroyed.lock().unwrap().is_empty(),
+		"a failed listing is not evidence the machine is gone"
+	);
+	assert_eq!(orc.unseen.len(), 1);
+}
+
+#[tokio::test]
 async fn polls_only_allowlisted_repositories() {
 	let mut orchestrator =
 		orchestrator(FakeQueue::default(), FakeFleet::with(Vec::new()));

@@ -90,6 +90,41 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		}
 	}
 
+	pub(super) async fn destroy_unseen(
+		&mut self,
+		survey: &Survey,
+		labels: &[String],
+	) {
+		let listed: HashSet<&str> = survey
+			.fleet
+			.iter()
+			.map(|(_, machine)| machine.name.as_str())
+			.collect();
+		self.unseen
+			.retain(|name, _| !listed.contains(name.as_str()));
+
+		let stale: Vec<(Provider, Machine)> = self
+			.unseen
+			.values()
+			.filter(|(kind, _)| !survey.blind.contains(kind))
+			.cloned()
+			.collect();
+		for (kind, machine) in stale {
+			let Some(limit) = self.lifetime_of(&machine.name, labels) else {
+				continue;
+			};
+			if self.age_of(&machine) <= limit {
+				continue;
+			}
+			warn!(
+				machine = %machine.name,
+				"never listed by its provider and past its lifetime; destroying"
+			);
+			self.destroy(kind, &machine).await;
+			self.unseen.remove(&machine.name);
+		}
+	}
+
 	fn lifetime_of(&self, name: &str, labels: &[String]) -> Option<Duration> {
 		let (label, _) = naming::split(name, labels)?;
 		let label = self.config.label(label)?;

@@ -26,6 +26,7 @@ pub struct Orchestrator<Q: Queue, F: Fleet> {
 	pub(crate) first_seen: HashMap<String, Instant>,
 	pub(crate) missed_polls: HashMap<String, u32>,
 	pub(crate) missed_machines: HashMap<String, (u32, Instant)>,
+	pub(crate) unseen: HashMap<String, (Provider, Machine)>,
 	pub(crate) refusals: HashMap<String, String>,
 }
 
@@ -56,6 +57,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			missed_polls: HashMap::new(),
 			refusals: HashMap::new(),
 			missed_machines: HashMap::new(),
+			unseen: HashMap::new(),
 		}
 	}
 
@@ -66,6 +68,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		let poll = self.poll_queues(&self.config.all_labels()).await;
 
 		self.destroy_overdue(&survey, &names).await;
+		self.destroy_unseen(&survey, &names).await;
 		if poll.all_queues_read {
 			self.destroy_departed(&poll.queued, &survey, &names).await;
 			self.forget_settled_refusals(&poll.queued);

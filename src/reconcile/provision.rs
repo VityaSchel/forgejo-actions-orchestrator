@@ -9,7 +9,7 @@ use crate::config::Label;
 use crate::forgejo::{self, Queue, StatusState};
 use crate::naming;
 use crate::policy::{self, JobRequest};
-use crate::provider::{placements, Fleet};
+use crate::provider::{placements, Fleet, Machine};
 
 use super::{Machines, Orchestrator, Queued, Survey};
 
@@ -123,7 +123,9 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		);
 
 		match self.place(&label, &name, &user_data).await {
-			Ok(placement) => {
+			Ok((placement, machine)) => {
+				self.unseen
+					.insert(machine.name.clone(), (label.provider, machine));
 				*pending.entry(label.name()).or_default() += 1;
 				info!(machine = %name, %placement, "created");
 				self.alerts.clear(Kind::CreateFailed, &job.handle);
@@ -193,7 +195,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		label: &Label,
 		name: &str,
 		user_data: &str,
-	) -> Result<String> {
+	) -> Result<(String, Machine)> {
 		let mut last = None;
 		for placement in placements(label) {
 			match self
@@ -209,10 +211,10 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 				)
 				.await
 			{
-				Ok(_) => {
-					return Ok(format!(
-						"{} in {}",
-						placement.plan, placement.location
+				Ok(machine) => {
+					return Ok((
+						format!("{} in {}", placement.plan, placement.location),
+						machine,
 					))
 				}
 				Err(error) => {
