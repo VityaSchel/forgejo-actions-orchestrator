@@ -10,14 +10,9 @@ A daemon watching an allowlist of Forgejo repositories and automatically renting
 | Scaleway       | marketplace image label   | No        |
 | Gcore          | image UUID                | No        |
 
-A Hetzner image name covers both architectures under different ids and the API resolves neither,
-so a name is looked up against the server type's architecture before the server is created.
+A Hetzner image name maps to a different id per architecture and the API resolves neither, so names are looked up against the server type's architecture first. The same lookup reports per-location stock, and locations it marks unavailable are skipped with a warning.
 
-Scaleway and Gcore are zone-scoped: they have no global list endpoint, so the daemon sweeps
-every location their labels name, and a machine id is `<zone>/<uuid>`. Both bill the boot
-volume separately from the instance, so both are created with an explicit size and destroyed
-with the volume.
-
+Scaleway and Gcore are zone-scoped with no global list endpoint, so the daemon sweeps every location their labels name and machine ids are `<zone>/<uuid>`. Both bill the boot volume separately, so it's created with an explicit size and destroyed with the machine.
 
 ## Install
 

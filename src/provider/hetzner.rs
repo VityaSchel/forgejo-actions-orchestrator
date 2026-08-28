@@ -1,6 +1,6 @@
 use time::OffsetDateTime;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -47,6 +47,15 @@ struct ServerTypes {
 #[derive(Deserialize)]
 struct ServerType {
 	architecture: String,
+	#[serde(default)]
+	locations: Vec<TypeLocation>,
+}
+
+#[derive(Deserialize)]
+struct TypeLocation {
+	name: String,
+	#[serde(default)]
+	available: bool,
 }
 
 #[derive(Deserialize)]
@@ -79,7 +88,7 @@ impl Hetzner {
 		format!("Bearer {}", self.token)
 	}
 
-	async fn architecture_of(&self, plan: &str) -> Result<String> {
+	async fn server_type(&self, plan: &str) -> Result<ServerType> {
 		let response = self
 			.http
 			.get(format!("{API}/server_types"))
@@ -94,21 +103,23 @@ impl Hetzner {
 			.server_types
 			.into_iter()
 			.next()
-			.map(|server_type| server_type.architecture)
 			.with_context(|| format!("hetzner: unknown server type {plan}"))
 	}
 
 	/// One image name covers both architectures under different ids, and the API
 	/// picks neither: https://docs.hetzner.cloud/#images-get-all-images
-	async fn image_for(&self, image: &str, plan: &str) -> Result<Value> {
+	async fn image_for(
+		&self,
+		image: &str,
+		architecture: &str,
+	) -> Result<Value> {
 		if let Ok(id) = image.parse::<i64>() {
 			return Ok(json!(id));
 		}
-		let architecture = self.architecture_of(plan).await?;
 		let response = self
 			.http
 			.get(format!("{API}/images"))
-			.query(&[("name", image), ("architecture", &architecture)])
+			.query(&[("name", image), ("architecture", architecture)])
 			.header("Authorization", self.auth())
 			.send()
 			.await
@@ -136,11 +147,16 @@ impl Cloud for Hetzner {
 		ssh_key: Option<&str>,
 		user_data: &str,
 	) -> Result<Machine> {
+		let server_type = self.server_type(plan).await?;
+		if !offered_in(&server_type, location) {
+			bail!("hetzner: {plan} is out of stock in {location}");
+		}
+		let image = self.image_for(image, &server_type.architecture).await?;
 		let mut body = json!({
 			"name": name,
 			"server_type": plan,
 			"location": location,
-			"image": self.image_for(image, plan).await?,
+			"image": image,
 			"user_data": user_data,
 			"start_after_create": true,
 		});
@@ -219,6 +235,16 @@ impl Cloud for Hetzner {
 	}
 }
 
+/// Only an explicit `available: false` blocks a placement: the field is absent on
+/// older API versions, and an unlisted location is left for the API to judge.
+fn offered_in(server_type: &ServerType, location: &str) -> bool {
+	server_type
+		.locations
+		.iter()
+		.find(|candidate| candidate.name == location)
+		.is_none_or(|candidate| candidate.available)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -230,6 +256,32 @@ mod tests {
 		}))
 		.unwrap();
 		assert_eq!(listed.server_types[0].architecture, "arm");
+	}
+
+	fn cax31(available: bool) -> ServerType {
+		serde_json::from_value(json!({
+			"architecture": "arm",
+			"locations": [
+				{ "name": "fsn1", "available": available },
+				{ "name": "hel1", "available": false },
+			],
+		}))
+		.unwrap()
+	}
+
+	#[test]
+	fn refuses_a_location_the_api_reports_as_out_of_stock() {
+		assert!(!offered_in(&cax31(false), "fsn1"));
+		assert!(offered_in(&cax31(true), "fsn1"));
+		assert!(!offered_in(&cax31(true), "hel1"));
+	}
+
+	#[test]
+	fn lets_the_api_judge_a_location_it_never_listed() {
+		assert!(offered_in(&cax31(false), "nbg1"));
+		let unknown: ServerType =
+			serde_json::from_value(json!({ "architecture": "x86" })).unwrap();
+		assert!(offered_in(&unknown, "fsn1"));
 	}
 
 	#[test]
