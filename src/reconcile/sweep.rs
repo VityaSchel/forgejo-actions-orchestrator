@@ -173,11 +173,12 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		if !survey.blind.is_empty() {
 			return;
 		}
-		let alive: HashSet<&str> = survey
+		let mut alive: HashSet<String> = survey
 			.fleet
 			.iter()
-			.map(|(_, machine)| machine.name.as_str())
+			.map(|(_, machine)| machine.name.clone())
 			.collect();
+		alive.extend(self.unseen.keys().cloned());
 		let repos = self.config.repos.clone();
 		let mut seen: HashSet<String> = HashSet::new();
 		let mut all_repos_listed = true;

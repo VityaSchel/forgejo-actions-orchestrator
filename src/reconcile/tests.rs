@@ -441,6 +441,51 @@ async fn keeps_a_runner_whose_provider_lists_the_machine_minutes_late() {
 }
 
 #[tokio::test]
+async fn does_not_provision_again_while_its_machine_is_unlisted() {
+	let created = machine("storm");
+	let queue = FakeQueue {
+		jobs: Ok(vec![job("storm")]),
+		..Default::default()
+	};
+	let mut orc = orchestrator(queue, FakeFleet::with(vec![]));
+	orc.unseen
+		.insert(created.name.clone(), (Provider::Hetzner, created.clone()));
+
+	orc.tick().await;
+
+	assert!(
+		orc.clouds.created.lock().unwrap().is_empty(),
+		"a machine we created but the provider has not listed is not a missing machine"
+	);
+}
+
+#[tokio::test]
+async fn keeps_a_runner_whose_machine_the_provider_never_listed() {
+	let created = machine("stranded");
+	let queue = FakeQueue {
+		jobs: Ok(vec![]),
+		runners: vec![Runner {
+			id: 42,
+			name: created.name.clone(),
+			ephemeral: true,
+		}],
+		..Default::default()
+	};
+	let mut orc = orchestrator(queue, FakeFleet::with(vec![]));
+	orc.config.daemon.reconcile_grace_secs = 0;
+	orc.unseen
+		.insert(created.name.clone(), (Provider::Hetzner, created.clone()));
+
+	orc.tick().await;
+	orc.tick().await;
+
+	assert!(
+		orc.forgejo.deleted.lock().unwrap().is_empty(),
+		"revoking the token of a machine we created kills the job it is running"
+	);
+}
+
+#[tokio::test]
 async fn destroys_a_machine_its_provider_never_listed() {
 	let stranded = aged_machine("stranded", 600);
 	let mut orc = orchestrator(FakeQueue::default(), FakeFleet::with(vec![]));

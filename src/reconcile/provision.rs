@@ -27,6 +27,9 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 				naming::split(&machine.name, names).map(|(_, h)| h.to_owned())
 			})
 			.collect();
+		served.extend(self.unseen.keys().filter_map(|name| {
+			naming::split(name, names).map(|(_, handle)| handle.to_owned())
+		}));
 
 		let mut pending: HashMap<String, usize> = HashMap::new();
 
