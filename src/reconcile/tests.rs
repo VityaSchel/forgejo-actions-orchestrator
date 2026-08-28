@@ -416,6 +416,31 @@ async fn keeps_a_runner_whose_machine_the_provider_has_not_listed_yet() {
 }
 
 #[tokio::test]
+async fn keeps_a_runner_whose_provider_lists_the_machine_minutes_late() {
+	let name = naming::machine_name("check", "slowlist");
+	let queue = FakeQueue {
+		jobs: Ok(vec![]),
+		runners: vec![Runner {
+			id: 42,
+			name: name.clone(),
+			ephemeral: true,
+		}],
+		..Default::default()
+	};
+	let mut orc = orchestrator(queue, FakeFleet::with(vec![]));
+	orc.config.daemon.reconcile_grace_secs = 300;
+
+	for _ in 0..8 {
+		orc.tick().await;
+	}
+	assert!(
+		orc.forgejo.deleted.lock().unwrap().is_empty(),
+		"a miss streak alone must not revoke a registration inside the grace"
+	);
+	assert_eq!(orc.missed_machines[&name].0, 8, "the streak still counts");
+}
+
+#[tokio::test]
 async fn polls_only_allowlisted_repositories() {
 	let mut orchestrator =
 		orchestrator(FakeQueue::default(), FakeFleet::with(Vec::new()));

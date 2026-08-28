@@ -25,7 +25,7 @@ pub struct Orchestrator<Q: Queue, F: Fleet> {
 	pub(crate) alerts: Alerts,
 	pub(crate) first_seen: HashMap<String, Instant>,
 	pub(crate) missed_polls: HashMap<String, u32>,
-	pub(crate) missed_machines: HashMap<String, u32>,
+	pub(crate) missed_machines: HashMap<String, (u32, Instant)>,
 	pub(crate) refusals: HashMap<String, String>,
 }
 

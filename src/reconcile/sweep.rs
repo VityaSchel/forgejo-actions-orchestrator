@@ -17,8 +17,7 @@ use super::{Orchestrator, Queued, Survey};
 /// a second miss only guards against a single anomalous read
 const MISSES_BEFORE_DESTROY: u32 = 2;
 
-/// A machine created last tick may not be listed by its provider yet
-/// reaping on that one reading strands the job with a revoked token
+/// One listing without the machine is never proof it is gone
 const MISSES_BEFORE_REAP: u32 = 2;
 
 impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
@@ -133,6 +132,8 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		}
 	}
 
+	/// A provider's list can lag creation by minutes, so a record counts as
+	/// orphaned only after a whole reconcile grace of misses.
 	pub(super) async fn reap_orphan_runners(&mut self, survey: &Survey) {
 		if !survey.blind.is_empty() {
 			return;
@@ -163,15 +164,17 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 					self.missed_machines.remove(&runner.name);
 					continue;
 				}
-				let missed = {
-					let count = self
+				let (missed, first_missed) = {
+					let seen = self
 						.missed_machines
 						.entry(runner.name.clone())
-						.or_insert(0);
-					*count += 1;
-					*count
+						.or_insert((0, Instant::now()));
+					seen.0 += 1;
+					*seen
 				};
-				if missed < MISSES_BEFORE_REAP {
+				if missed < MISSES_BEFORE_REAP
+					|| first_missed.elapsed() < self.config.reconcile_grace()
+				{
 					continue;
 				}
 				match self.forgejo.delete_runner(repo, runner.id).await {
