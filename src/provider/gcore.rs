@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use time::OffsetDateTime;
@@ -15,7 +17,10 @@ const API: &str = "https://api.gcore.com/cloud/v1";
 const CREATE_API: &str = "https://api.gcore.com/cloud/v2";
 
 const BOOT_VOLUME_GB: u32 = 80;
-const BOOT_VOLUME_TYPE: &str = "ssd_hiiops";
+/// Each region sells a different subset and 400s on the rest; Tokyo's create
+/// offered only the first two: https://docs.gcore.com/api-reference/cloud/regions/get-region
+const BOOT_VOLUME_TYPES: [&str; 3] =
+	["ssd_lowlatency", "ssd_hiiops", "standard"];
 const PAGE_LIMIT: u32 = 1000;
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 const CREATE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -25,6 +30,7 @@ pub struct Gcore {
 	token: String,
 	project_id: String,
 	locations: Vec<String>,
+	volume_types: Mutex<HashMap<String, &'static str>>,
 }
 
 #[derive(Deserialize)]
@@ -71,6 +77,12 @@ struct Volume {
 	id: String,
 }
 
+#[derive(Deserialize)]
+struct Region {
+	#[serde(default)]
+	available_volume_types: Option<Vec<String>>,
+}
+
 impl Gcore {
 	pub fn from_env(locations: &[String]) -> Result<Self> {
 		Ok(Self {
@@ -78,6 +90,7 @@ impl Gcore {
 			token: secret::load("GCORE_TOKEN")?,
 			project_id: secret::load("GCORE_PROJECT_ID")?,
 			locations: locations.to_vec(),
+			volume_types: Mutex::new(HashMap::new()),
 		})
 	}
 
@@ -91,6 +104,40 @@ impl Gcore {
 
 	fn create_scope(&self, region: &str) -> String {
 		format!("{CREATE_API}/instances/{}/{region}", self.project_id)
+	}
+
+	fn cached_volume_type(&self, region: &str) -> Option<&'static str> {
+		self.volume_types.lock().ok()?.get(region).copied()
+	}
+
+	/// available_volume_types stays null unless show_volume_types is set: https://docs.gcore.com/api-reference/cloud/regions/get-region
+	async fn volume_type(&self, region: &str) -> Result<&'static str> {
+		if let Some(cached) = self.cached_volume_type(region) {
+			return Ok(cached);
+		}
+		let response = self
+			.http
+			.get(format!("{API}/regions/{region}"))
+			.query(&[("show_volume_types", "true")])
+			.header("Authorization", self.auth())
+			.send()
+			.await
+			.context("gcore: reading region volume types")?;
+		let found: Region =
+			super::decode(response, "gcore: reading region volume types")
+				.await?;
+		let offered = found.available_volume_types.unwrap_or_default();
+		let chosen = preferred_volume_type(&offered).with_context(|| {
+			format!(
+				"gcore: region {region} offers none of {}, only {}",
+				BOOT_VOLUME_TYPES.join(", "),
+				offered.join(", ")
+			)
+		})?;
+		if let Ok(mut cache) = self.volume_types.lock() {
+			cache.insert(region.to_owned(), chosen);
+		}
+		Ok(chosen)
 	}
 
 	async fn wait_for_instance(&self, task: &str) -> Result<String> {
@@ -155,11 +202,19 @@ impl Cloud for Gcore {
 		ssh_key: Option<&str>,
 		user_data: &str,
 	) -> Result<Machine> {
+		let volume_type = self.volume_type(location).await?;
 		let response = self
 			.http
 			.post(self.create_scope(location))
 			.header("Authorization", self.auth())
-			.json(&create_body(name, plan, image, ssh_key, user_data))
+			.json(&create_body(
+				name,
+				plan,
+				image,
+				volume_type,
+				ssh_key,
+				user_data,
+			))
 			.send()
 			.await
 			.context("gcore: creating instance")?;
@@ -231,6 +286,7 @@ fn create_body(
 	name: &str,
 	plan: &str,
 	image: &str,
+	volume_type: &str,
 	ssh_key: Option<&str>,
 	user_data: &str,
 ) -> Value {
@@ -243,7 +299,7 @@ fn create_body(
 			"boot_index": 0,
 			"image_id": image,
 			"size": BOOT_VOLUME_GB,
-			"type_name": BOOT_VOLUME_TYPE,
+			"type_name": volume_type,
 			"delete_on_termination": true,
 		}],
 		"user_data": super::base64(user_data),
@@ -252,6 +308,12 @@ fn create_body(
 		body["ssh_key_name"] = json!(key);
 	}
 	body
+}
+
+fn preferred_volume_type(offered: &[String]) -> Option<&'static str> {
+	BOOT_VOLUME_TYPES
+		.into_iter()
+		.find(|wanted| offered.iter().any(|found| found == wanted))
 }
 
 fn machine_id(region: &str, instance: &str) -> String {
@@ -279,9 +341,14 @@ mod tests {
 			"runner-1",
 			"a1-standard-8-16",
 			"d52b7e87-50f2-4ad0-a5f8-8b9f80591384",
+			"ssd_hiiops",
 			None,
 			"#cloud-config\n",
 		)
+	}
+
+	fn offered(types: &[&str]) -> Vec<String> {
+		types.iter().map(|found| found.to_string()).collect()
 	}
 
 	#[test]
@@ -321,6 +388,70 @@ mod tests {
 	}
 
 	#[test]
+	fn asks_for_the_volume_type_the_region_was_polled_for() {
+		let tokyo = create_body(
+			"runner-1",
+			"a1-standard-8-16",
+			"d52b7e87-50f2-4ad0-a5f8-8b9f80591384",
+			"ssd_lowlatency",
+			None,
+			"#cloud-config\n",
+		);
+		assert_eq!(tokyo["volumes"][0]["type_name"], "ssd_lowlatency");
+		assert_eq!(tokyo["volumes"][0]["size"], 80);
+		assert_eq!(tokyo["volumes"][0]["delete_on_termination"], true);
+	}
+
+	#[test]
+	fn takes_the_fastest_volume_type_a_region_offers() {
+		assert_eq!(
+			preferred_volume_type(&offered(&["standard", "ssd_hiiops"])),
+			Some("ssd_hiiops")
+		);
+		assert_eq!(
+			preferred_volume_type(&offered(&["ssd_lowlatency", "standard"])),
+			Some("ssd_lowlatency")
+		);
+		assert_eq!(
+			preferred_volume_type(&offered(&["standard"])),
+			Some("standard")
+		);
+	}
+
+	#[test]
+	fn refuses_a_region_that_offers_no_type_we_want() {
+		assert_eq!(preferred_volume_type(&offered(&["cold", "ultra"])), None);
+		assert_eq!(preferred_volume_type(&[]), None);
+	}
+
+	#[test]
+	fn reads_the_volume_types_a_region_reports() {
+		let tokyo: Region = serde_json::from_value(json!({
+			"id": 30,
+			"display_name": "Tokyo",
+			"available_volume_types": ["ssd_lowlatency", "standard"],
+		}))
+		.unwrap();
+		assert_eq!(
+			preferred_volume_type(&tokyo.available_volume_types.unwrap()),
+			Some("ssd_lowlatency")
+		);
+	}
+
+	#[test]
+	fn treats_an_unpolled_region_as_offering_nothing() {
+		let unpolled: Region = serde_json::from_value(json!({
+			"id": 30,
+			"available_volume_types": null,
+		}))
+		.unwrap();
+		assert!(unpolled.available_volume_types.is_none());
+		let absent: Region =
+			serde_json::from_value(json!({ "id": 30 })).unwrap();
+		assert!(absent.available_volume_types.is_none());
+	}
+
+	#[test]
 	fn asks_for_a_single_internet_facing_interface() {
 		assert_eq!(
 			body()["interfaces"],
@@ -342,8 +473,14 @@ mod tests {
 	#[test]
 	fn names_a_keypair_only_when_one_is_configured() {
 		assert!(body().get("ssh_key_name").is_none());
-		let keyed =
-			create_body("runner-1", "flavor", "image", Some("ci"), "user-data");
+		let keyed = create_body(
+			"runner-1",
+			"flavor",
+			"image",
+			"standard",
+			Some("ci"),
+			"user-data",
+		);
 		assert_eq!(keyed["ssh_key_name"], "ci");
 	}
 

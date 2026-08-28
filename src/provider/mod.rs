@@ -241,8 +241,9 @@ async fn expect_gone(response: reqwest::Response, what: &str) -> Result<()> {
 	)
 }
 
+/// The actionable part of a rejection sits in a details array or a help message.
 fn clip(body: &str) -> String {
-	body.chars().take(200).collect()
+	body.chars().take(1000).collect()
 }
 
 pub fn timestamp(value: &str) -> Option<OffsetDateTime> {

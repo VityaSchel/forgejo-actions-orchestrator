@@ -12,6 +12,7 @@ use crate::secret;
 
 const API: &str = "https://api.scaleway.com/instance/v1";
 const BLOCK_API: &str = "https://api.scaleway.com/block/v1";
+const MARKETPLACE_API: &str = "https://api.scaleway.com/marketplace/v2";
 
 const AUTH_HEADER: &str = "X-Auth-Token";
 const CLOUD_INIT_KEY: &str = "cloud-init";
@@ -58,6 +59,18 @@ struct Volume {
 	volume_type: String,
 }
 
+#[derive(Deserialize)]
+struct LocalImages {
+	local_images: Vec<LocalImage>,
+}
+
+#[derive(Deserialize)]
+struct LocalImage {
+	id: String,
+	#[serde(default)]
+	compatible_commercial_types: Vec<String>,
+}
+
 impl Scaleway {
 	pub fn from_env(locations: &[String]) -> Result<Self> {
 		Ok(Self {
@@ -70,6 +83,40 @@ impl Scaleway {
 
 	fn scope(&self, zone: &str) -> String {
 		format!("{API}/zones/{zone}/servers")
+	}
+
+	/// Create takes a local image id, not a label, and only the instance_sbs one
+	/// clones into volume 0 instead of leaving it raw: https://github.com/scaleway/scaleway-sdk-go/blob/master/api/marketplace/v2/marketplace_utils.go
+	async fn local_image(
+		&self,
+		zone: &str,
+		plan: &str,
+		image: &str,
+	) -> Result<String> {
+		if is_uuid(image) {
+			return Ok(image.to_owned());
+		}
+		let label = image.replace('-', "_");
+		let response = self
+			.http
+			.get(format!("{MARKETPLACE_API}/local-images"))
+			.query(&[
+				("image_label", label.as_str()),
+				("zone", zone),
+				("type", root_image_type()),
+			])
+			.header(AUTH_HEADER, &self.token)
+			.send()
+			.await
+			.context("scaleway: resolving image")?;
+		let listed: LocalImages =
+			super::decode(response, "scaleway: resolving image").await?;
+		compatible_image(&listed.local_images, plan).with_context(|| {
+			format!(
+				"scaleway: no {} image {label} for {plan} in {zone}",
+				root_image_type()
+			)
+		})
 	}
 
 	/// cloud-init is no field of the create body, and only ever plain text: https://www.scaleway.com/en/docs/instances/how-to/use-cloud-init/
@@ -166,6 +213,7 @@ impl Scaleway {
 			let status = response.status();
 			if status.is_success()
 				|| status == reqwest::StatusCode::NOT_FOUND
+				|| !retryable(status)
 				|| Instant::now() >= deadline
 			{
 				return super::expect_gone(
@@ -189,7 +237,8 @@ impl Cloud for Scaleway {
 		ssh_key: Option<&str>,
 		user_data: &str,
 	) -> Result<Machine> {
-		let body = create_body(name, plan, image, &self.project_id, ssh_key)?;
+		let image = self.local_image(location, plan, image).await?;
+		let body = create_body(name, plan, &image, &self.project_id, ssh_key)?;
 		let response = self
 			.http
 			.post(self.scope(location))
@@ -278,7 +327,7 @@ impl Cloud for Scaleway {
 	}
 }
 
-/// A commercial type with no local disk takes the image's own small size unless the root volume is sized: https://www.scaleway.com/en/developers/api/instance/#path-instances-create-an-instance
+/// Volume 0 carries the type and the size and nothing else, a name included: https://github.com/scaleway/scaleway-cli/blob/master/internal/namespaces/instance/v1/custom_server_create.go
 fn create_body(
 	name: &str,
 	plan: &str,
@@ -300,12 +349,36 @@ fn create_body(
 		"dynamic_ip_required": true,
 		"volumes": {
 			"0": {
-				"name": format!("{name}-root"),
 				"volume_type": ROOT_VOLUME_TYPE,
 				"size": ROOT_VOLUME_BYTES,
 			},
 		},
 	}))
+}
+
+/// A label holds one image per architecture; the commercial type is what tells
+/// them apart: https://github.com/scaleway/scaleway-sdk-go/blob/master/api/marketplace/v2/marketplace_utils.go
+fn compatible_image(images: &[LocalImage], plan: &str) -> Option<String> {
+	images
+		.iter()
+		.find(|image| {
+			image
+				.compatible_commercial_types
+				.iter()
+				.any(|candidate| candidate.eq_ignore_ascii_case(plan))
+		})
+		.map(|image| image.id.clone())
+}
+
+fn is_uuid(value: &str) -> bool {
+	value.len() == 36
+		&& value
+			.chars()
+			.enumerate()
+			.all(|(index, character)| match index {
+				8 | 13 | 18 | 23 => character == '-',
+				_ => character.is_ascii_hexdigit(),
+			})
 }
 
 fn machine_id(zone: &str, server: &str) -> String {
@@ -319,6 +392,22 @@ fn split_id(id: &str) -> Result<(&str, &str)> {
 }
 
 /// terminate deletes l_ssd and scratch volumes, an sbs_volume it only detaches: https://www.scaleway.com/en/developers/api/instance/#path-instances-perform-action
+/// Derived, not a second constant, so the pair cannot drift apart: https://github.com/scaleway/scaleway-cli/blob/master/internal/namespaces/instance/v1/custom_server_create_builder.go
+fn root_image_type() -> &'static str {
+	match ROOT_VOLUME_TYPE {
+		"sbs_volume" => "instance_sbs",
+		_ => "instance_local",
+	}
+}
+
+/// A detach resolves on a retry; a rejected token never does.
+fn retryable(status: reqwest::StatusCode) -> bool {
+	!matches!(
+		status,
+		reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+	)
+}
+
 fn block_volumes_of(server: &Server) -> Vec<String> {
 	server
 		.volumes
@@ -349,15 +438,39 @@ async fn accepted(response: reqwest::Response, what: &str) -> Result<()> {
 mod tests {
 	use super::*;
 
+	const LOCAL_IMAGE: &str = "65ce6135-f6d5-4e90-82ec-ef09d29d1cff";
+
 	fn body() -> Value {
 		create_body(
 			"ci-orc-check-a1b2c3",
 			"BASIC2-A8C-16G",
-			"debian_bookworm",
+			LOCAL_IMAGE,
 			"11111111-1111-1111-1111-111111111111",
 			None,
 		)
 		.unwrap()
+	}
+
+	fn images() -> Vec<LocalImage> {
+		let listed: LocalImages = serde_json::from_value(json!({
+			"local_images": [
+				{
+					"id": LOCAL_IMAGE,
+					"arch": "arm64",
+					"compatible_commercial_types": [
+						"COPARM1-2C-8G",
+						"BASIC2-A8C-16G",
+					],
+				},
+				{
+					"id": "6d3c053e-c728-4294-b23a-560b62a4d592",
+					"arch": "x86_64",
+					"compatible_commercial_types": ["DEV1-S", "PRO2-XXS"],
+				},
+			],
+		}))
+		.unwrap();
+		listed.local_images
 	}
 
 	#[test]
@@ -390,15 +503,60 @@ mod tests {
 		let root = body()["volumes"]["0"].clone();
 		assert_eq!(root["volume_type"], "sbs_volume");
 		assert_eq!(root["size"], 80_000_000_000u64);
-		assert_eq!(root["name"], "ci-orc-check-a1b2c3-root");
+		assert_eq!(ROOT_VOLUME_BYTES % 512, 0);
 	}
 
 	#[test]
-	fn sends_the_marketplace_label_and_lets_the_type_pick_the_arch() {
+	fn describes_the_root_volume_by_nothing_but_its_type_and_size() {
+		let root = body()["volumes"]["0"].clone();
+		let described: Vec<&str> = root
+			.as_object()
+			.unwrap()
+			.keys()
+			.map(String::as_str)
+			.collect();
+		assert_eq!(described, vec!["size", "volume_type"]);
+	}
+
+	#[test]
+	fn sends_a_resolved_local_image_and_lets_the_type_pick_the_arch() {
 		let body = body();
-		assert_eq!(body["image"], "debian_bookworm");
+		assert_eq!(body["image"], LOCAL_IMAGE);
 		assert_eq!(body["commercial_type"], "BASIC2-A8C-16G");
 		assert!(body.get("arch").is_none());
+	}
+
+	#[test]
+	fn picks_the_local_image_the_commercial_type_can_boot() {
+		let images = images();
+		assert_eq!(
+			compatible_image(&images, "BASIC2-A8C-16G").as_deref(),
+			Some(LOCAL_IMAGE)
+		);
+		assert_eq!(
+			compatible_image(&images, "basic2-a8c-16g").as_deref(),
+			Some(LOCAL_IMAGE)
+		);
+		assert_eq!(
+			compatible_image(&images, "DEV1-S").as_deref(),
+			Some("6d3c053e-c728-4294-b23a-560b62a4d592")
+		);
+	}
+
+	#[test]
+	fn resolves_no_image_for_a_type_no_label_variant_lists() {
+		assert!(compatible_image(&images(), "GP1-XS").is_none());
+		assert!(compatible_image(&[], "BASIC2-A8C-16G").is_none());
+	}
+
+	#[test]
+	fn tells_a_local_image_id_apart_from_a_marketplace_label() {
+		assert!(is_uuid(LOCAL_IMAGE));
+		assert!(!is_uuid("debian_bookworm"));
+		assert!(!is_uuid("debian-bookworm"));
+		assert!(!is_uuid("65ce6135f6d54e9082ecef09d29d1cff"));
+		assert!(!is_uuid("65ce6135-f6d5-4e90-82ec-ef09d29d1cfg"));
+		assert!(!is_uuid("65ce6135-f6d5-4e90-82ec-ef09d29d1cff-"));
 	}
 
 	#[test]
@@ -434,6 +592,17 @@ mod tests {
 		}))
 		.unwrap();
 		assert_eq!(block_volumes_of(&server), vec!["root-1", "root-2"]);
+	}
+
+	#[test]
+	fn waits_out_a_detach_but_not_a_rejected_token() {
+		use reqwest::StatusCode;
+		assert!(retryable(StatusCode::CONFLICT));
+		assert!(retryable(StatusCode::PRECONDITION_FAILED));
+		assert!(retryable(StatusCode::TOO_MANY_REQUESTS));
+		assert!(retryable(StatusCode::INTERNAL_SERVER_ERROR));
+		assert!(!retryable(StatusCode::UNAUTHORIZED));
+		assert!(!retryable(StatusCode::FORBIDDEN));
 	}
 
 	#[test]
