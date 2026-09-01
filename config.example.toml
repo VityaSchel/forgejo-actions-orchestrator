@@ -22,15 +22,14 @@ machine_prefix = "ci-orc"
 # [alert]
 # webhook_url = "https://git.example.org/_hooks/ci-orchestrator"
 
+#! See pricing plans for all supported providers as of September 2026 at the end of the file.
+
 #! ========== Pull request checks ==========
 #! A job is matched exactly against a [[label]] by its label set
 
 [[label]]
 labels = ["check", "hetzner"]
 provider = "hetzner"
-#!  cx43:  8 shared vCPU, 16 GB RAM, €0.031/hr
-#!  cx53: 16 shared vCPU, 32 GB RAM, €0.057/hr
-#! cpx42:  8 shared vCPU, 16 GB RAM, €0.135/hr
 plans = ["cx43", "cx53", "cpx42"]
 locations = ["fsn1", "nbg1", "hel1"]
 #! A pre-baked snapshot id
@@ -110,3 +109,162 @@ allowed_events = ["push", "workflow_dispatch"]
 #! storage list after any destroy that alerted.
 # lifetime_minutes = 90
 # allowed_events = ["workflow_dispatch"]
+
+
+#! Provider prices (last updated September 2026)
+
+
+#! ======================== Hetzner ========================
+
+
+#! Cost-optimized shared x86 Intel/AMD. Limited availability.
+
+#!      cx_3 | Europe (fsn1, nbg1, hel1)
+#!  cx23:  2 shared vCPU Intel/AMD x86,  4 GB RAM, €0.011/hr
+#!  cx33:  4 shared vCPU Intel/AMD x86,  8 GB RAM, €0.016/hr
+#!  cx43:  8 shared vCPU Intel/AMD x86, 16 GB RAM, €0.031/hr
+#!  cx53: 16 shared vCPU Intel/AMD x86, 32 GB RAM, €0.057/hr
+
+
+#! Cost-optimized shared Arm64. Limited availability. Europe only.
+
+#!     cax_1 | Europe (fsn1, nbg1, hel1)
+#! cax11:  2 shared vCPU Ampere Arm64,   4 GB RAM, €0.012/hr
+#! cax21:  4 shared vCPU Ampere Arm64,   8 GB RAM, €0.020/hr
+#! cax31:  8 shared vCPU Ampere Arm64,  16 GB RAM, €0.041/hr
+#! cax41: 16 shared vCPU Ampere Arm64,  32 GB RAM, €0.079/hr
+
+
+#! Regular performance shared x86 AMD.
+
+#!     cpx_2 | Europe (fsn1, nbg1, hel1)
+#! cpx12:  1 shared vCPU AMD x86,        2 GB RAM, €0.022/hr
+#! cpx22:  2 shared vCPU AMD x86,        4 GB RAM, €0.038/hr
+#! cpx32:  4 shared vCPU AMD x86,        8 GB RAM, €0.069/hr
+#! cpx42:  8 shared vCPU AMD x86,       16 GB RAM, €0.135/hr
+#! cpx52: 12 shared vCPU AMD x86,       24 GB RAM, €0.195/hr
+#! cpx62: 16 shared vCPU AMD x86,       32 GB RAM, €0.252/hr
+
+#!     cpx_2 | Asia (sin)
+#! cpx12:  1 shared vCPU AMD x86,        2 GB RAM, €0.030/hr
+#! cpx22:  2 shared vCPU AMD x86,        4 GB RAM, €0.051/hr
+#! cpx32:  4 shared vCPU AMD x86,        8 GB RAM, €0.095/hr
+#! cpx42:  8 shared vCPU AMD x86,       16 GB RAM, €0.181/hr
+#! cpx52: 12 shared vCPU AMD x86,       24 GB RAM, €0.261/hr
+#! cpx62: 16 shared vCPU AMD x86,       32 GB RAM, €0.333/hr
+
+#!     cpx_1 | USA (hil, ash)
+#! cpx11:  2 shared vCPU AMD x86,        2 GB RAM, €0.034/hr
+#! cpx21:  3 shared vCPU AMD x86,        4 GB RAM, €0.062/hr
+#! cpx31:  4 shared vCPU AMD x86,        8 GB RAM, €0.121/hr
+#! cpx41:  8 shared vCPU AMD x86,       16 GB RAM, €0.234/hr
+#! cpx51: 16 shared vCPU AMD x86,       32 GB RAM, €0.461/hr
+
+
+#! General purpose dedicated x86 AMD.
+
+#!     ccx_3 | Europe (fsn1, nbg1, hel1)
+#! ccx13:  2 dedicated vCPU AMD x86,     8 GB RAM, €0.083/hr
+#! ccx23:  4 dedicated vCPU AMD x86,    16 GB RAM, €0.167/hr
+#! ccx33:  8 dedicated vCPU AMD x86,    32 GB RAM, €0.268/hr
+#! ccx43: 16 dedicated vCPU AMD x86,    64 GB RAM, €0.535/hr
+#! ccx53: 32 dedicated vCPU AMD x86,   128 GB RAM, €1.035/hr
+#! ccx63: 48 dedicated vCPU AMD x86,   192 GB RAM, €1.655/hr
+
+#!     ccx_3 | Asia (sin)
+#! ccx13:  2 dedicated vCPU AMD x86,     8 GB RAM, €0.105/hr
+#! ccx23:  4 dedicated vCPU AMD x86,    16 GB RAM, €0.210/hr
+#! ccx33:  8 dedicated vCPU AMD x86,    32 GB RAM, €0.338/hr
+#! ccx43: 16 dedicated vCPU AMD x86,    64 GB RAM, €0.661/hr
+#! ccx53: 32 dedicated vCPU AMD x86,   128 GB RAM, €1.264/hr
+#! ccx63: 48 dedicated vCPU AMD x86,   192 GB RAM, €2.010/hr
+
+#!     ccx_3 | USA (hil, ash)
+#! ccx13:  2 dedicated vCPU AMD x86,     8 GB RAM, €0.084/hr
+#! ccx23:  4 dedicated vCPU AMD x86,    16 GB RAM, €0.170/hr
+#! ccx33:  8 dedicated vCPU AMD x86,    32 GB RAM, €0.273/hr
+#! ccx43: 16 dedicated vCPU AMD x86,    64 GB RAM, €0.542/hr
+#! ccx53: 32 dedicated vCPU AMD x86,   128 GB RAM, €1.044/hr
+#! ccx63: 48 dedicated vCPU AMD x86,   192 GB RAM, €1.668/hr
+
+
+#! ========================= Vultr =========================
+
+
+#! Shared CPU | vc2, vhp, vhf
+
+#! Cloud Compute, previous generation Intel CPUs | vc2
+#!   vc2-1c-1gb:  1 shared vCPU x86,  1 GB RAM, $0.007/hr
+#!   vc2-1c-2gb:  1 shared vCPU x86,  2 GB RAM, $0.015/hr
+#!   vc2-2c-2gb:  2 shared vCPU x86,  2 GB RAM, $0.022/hr
+#!   vc2-2c-4gb:  2 shared vCPU x86,  4 GB RAM, $0.030/hr
+#!   vc2-4c-8gb:  4 shared vCPU x86,  8 GB RAM, $0.060/hr
+#!  vc2-6c-16gb:  6 shared vCPU x86, 16 GB RAM, $0.119/hr
+#!  vc2-8c-32gb:  8 shared vCPU x86, 32 GB RAM, $0.238/hr
+#! vc2-16c-64gb: 16 shared vCPU x86, 64 GB RAM, $0.476/hr
+#! vc2-24c-96gb: 24 shared vCPU x86, 96 GB RAM, $0.952/hr
+
+#! High-performance | vhp
+#!   vhp-1c-1gb:  1 shared vCPU x86,  1 GB RAM, $0.009/hr
+#!   vhp-1c-2gb:  1 shared vCPU x86,  2 GB RAM, $0.018/hr
+#!   vhp-2c-2gb:  2 shared vCPU x86,  2 GB RAM, $0.027/hr
+#!   vhp-2c-4gb:  2 shared vCPU x86,  4 GB RAM, $0.036/hr
+#!   vhp-4c-8gb:  4 shared vCPU x86,  8 GB RAM, $0.071/hr
+#!  vhp-4c-12gb:  4 shared vCPU x86, 12 GB RAM, $0.107/hr
+#!  vhp-8c-16gb:  8 shared vCPU x86, 16 GB RAM, $0.143/hr
+
+#! High-frequency | vhf
+#!   vhf-1c-1gb:  1 shared vCPU x86,  1 GB RAM, $0.009/hr
+#!   vhf-1c-2gb:  1 shared vCPU x86,  2 GB RAM, $0.018/hr
+#!   vhf-2c-2gb:  2 shared vCPU x86,  2 GB RAM, $0.027/hr
+#!   vhf-2c-4gb:  2 shared vCPU x86,  4 GB RAM, $0.036/hr
+#!   vhf-3c-8gb:  3 shared vCPU x86,  8 GB RAM, $0.071/hr
+#!  vhf-4c-16gb:  4 shared vCPU x86, 16 GB RAM, $0.143/hr
+#!  vhf-6c-24gb:  6 shared vCPU x86, 24 GB RAM, $0.214/hr
+#!  vhf-8c-32gb:  8 shared vCPU x86, 32 GB RAM, $0.286/hr
+#! vhf-12c-48gb: 12 shared vCPU x86, 48 GB RAM, $0.381/hr
+#! vhf-16c-58gb: 16 shared vCPU x86, 58 GB RAM, $0.476/hr
+
+
+#! ======================== Cherry ========================
+
+
+#! TBD
+
+
+#! ======================= Scaleway =======================
+
+#! Shared vCPU x86 AMD EPYC™ 9555P (3.2 GHz)
+#!   BASIC3-X2C-4G:  2 shared vCPU x86,  4 GB RAM, €0.03945/hr
+#!   BASIC3-X2C-8G:  2 shared vCPU x86,  8 GB RAM, €0.05923/hr
+#!   BASIC3-X4C-8G:  4 shared vCPU x86,  8 GB RAM, €0.07900/hr
+#!  BASIC3-X4C-16G:  4 shared vCPU x86, 16 GB RAM, €0.11845/hr
+#!  BASIC3-X6C-12G:  6 shared vCPU x86, 12 GB RAM, €0.13560/hr
+#!  BASIC3-X6C-24G:  6 shared vCPU x86, 24 GB RAM, €0.15530/hr
+#!  BASIC3-X8C-16G:  8 shared vCPU x86, 16 GB RAM, €0.17768/hr
+#!  BASIC3-X8C-32G:  8 shared vCPU x86, 32 GB RAM, €0.23680/hr
+#! BASIC3-X12C-24G: 12 shared vCPU x86, 24 GB RAM, €0.27110/hr
+#! BASIC3-X12C-48G: 12 shared vCPU x86, 48 GB RAM, €0.31040/hr
+#! BASIC3-X16C-32G: 16 shared vCPU x86, 32 GB RAM, €0.35525/hr
+#! BASIC3-X16C-64G: 16 shared vCPU x86, 64 GB RAM, €0.47329/hr
+
+#! Shared vCPU Arm64 Ampere M128-30
+#!   BASIC3-A2C-4G:  2 shared vCPU x86,  4 GB RAM, €0.02300/hr
+#!   BASIC3-A2C-8G:  2 shared vCPU x86,  8 GB RAM, €0.03450/hr
+#!   BASIC3-A4C-8G:  4 shared vCPU x86,  8 GB RAM, €0.05170/hr
+#!  BASIC3-A4C-16G:  4 shared vCPU x86, 16 GB RAM, €0.06890/hr
+#!  BASIC3-A6C-12G:  4 shared vCPU x86, 16 GB RAM, €0.07890/hr
+#!  BASIC3-A6C-24G:  4 shared vCPU x86, 16 GB RAM, €0.09030/hr
+#!  BASIC3-A8C-16G:  4 shared vCPU x86, 16 GB RAM, €0.10340/hr
+#!  BASIC3-A8C-32G:  4 shared vCPU x86, 16 GB RAM, €0.13780/hr
+#! BASIC3-A12C-24G:  4 shared vCPU x86, 16 GB RAM, €0.15780/hr
+#! BASIC3-A12C-48G:  4 shared vCPU x86, 16 GB RAM, €0.18070/hr
+#! BASIC3-A16C-32G:  4 shared vCPU x86, 16 GB RAM, €0.20670/hr
+#! BASIC3-A16C-64G:  4 shared vCPU x86, 16 GB RAM, €0.27560/hr
+
+
+#! ======================== Gcore ========================
+
+#! vCPU x86 AMD EPYC™ 4th Gen
+
+#! vCPU Arm64 ARM Ampere®Altra® Max Family. Tokyo-only.
