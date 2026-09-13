@@ -1,146 +1,150 @@
 # Forgejo Actions Orchestrator
 
-A daemon watching an allowlist of Forgejo repositories and automatically renting an ephemeral single-use machine from a cloud provider for secure and hermetic CI execution. No RCE on your orchestrator host, no risks to your infrastructure, no DIND limitations or kernel vulnerabilities exploits.
+A daemon that watches an allowlist of Forgejo repositories and rents a single-use cloud machine for each queued job. Jobs run on that machine instead of the orchestrator host, so no RCE on your host, no Docker-in-Docker limitations, no kernel vulerabilities or exploits.
 
-| Provider       | Image field               | Snapshots |
-| -------------- | ------------------------- | --------- |
-| Hetzner Cloud  | image name or snapshot id | Yes       |
-| Vultr          | numeric `os_id`           | No        |
-| Cherry Servers | OS slug                   | No        |
-| Scaleway       | marketplace image label   | No        |
-| Gcore          | image UUID                | No        |
+| Provider       | `provider` | `image`                         | `locations`                   |
+| -------------- | ---------- | ------------------------------- | ----------------------------- |
+| Hetzner Cloud  | `hetzner`  | image name or snapshot id       | `fsn1`, `hel1`                |
+| Vultr          | `vultr`    | numeric `os_id`                 | `ams`, `ewr`                  |
+| Cherry Servers | `cherry`   | OS slug                         | `LT-Siauliai`, `US-Chicago`   |
+| Scaleway       | `scaleway` | marketplace label or image UUID | `fr-par-1`, `nl-ams-1`        |
+| Gcore          | `gcore`    | image UUID                      | numeric region id: `30`, `76` |
 
-A Hetzner image name maps to a different id per architecture and the API resolves neither, so names are looked up against the server type's architecture first. The same lookup reports per-location stock, and locations it marks unavailable are skipped with a warning.
+`plans` takes the provider's server type names. The end of [config.example.toml](./config.example.toml) lists every type with its price.
 
-Scaleway and Gcore are zone-scoped with no global list endpoint, so the daemon sweeps every location their labels name and machine ids are `<zone>/<uuid>`. Both bill the boot volume separately, so it's created with an explicit size and destroyed with the machine.
+- Hetzner resolves an image name for each plan's architecture, so one label can mix x86 and Arm plans. A snapshot id boots only on the architecture it was taken on.
+- Scaleway resolves a marketplace label to the variant each plan and zone supports.
+- Scaleway and Gcore image UUIDs exist in one zone or region only.
 
 ## Install
 
-1. **Download the pre-built binary from [Releases](https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases)** (recommended):
+The steps use `example` as the instance name. Choose your own instance name and use it in the config file, the credentials directory and the systemd drop-in.
+
+1. Download the binary from [Releases](https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases) (4.6 MB):
+
    ```sh
-   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases/download/v1.0.0/forgejo-actions-orchestrator-linux-x86_64
-   install -Dm755 ./forgejo-actions-orchestrator-linux-x86_64 /usr/local/bin/forgejo-actions-orchestrator
+   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases/download/v1.1.4/forgejo-actions-orchestrator-linux-x86_64
+   install -Dm755 forgejo-actions-orchestrator-linux-x86_64 /usr/local/bin/forgejo-actions-orchestrator
    ```
--  or build it from source:
+
+   Builds are [reproducible](./CONTRIBUTING.md#cross-compile).
+
+   Or build it from source. `rustup` installs the toolchain from `rust-toolchain.toml` on first use.
+
    ```sh
    git clone https://git.hloth.dev/hloth/forgejo-actions-orchestrator
    cd forgejo-actions-orchestrator
-   # Needs the toolchain named in rust-toolchain.toml; rustup installs it on first use.
    cargo build --release --locked
    install -Dm755 target/release/forgejo-actions-orchestrator /usr/local/bin/forgejo-actions-orchestrator
    ```
 
-2. Configure for systemd:
+2. Install the systemd unit, the provider drop-in and the config. In a source checkout, skip `wget` and take the first two files from `deploy/`.
+
    ```sh
-   # Replace MYSITE with your custom name, e.g. forgejo or git.example.org
+   RAW=https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main
+   wget $RAW/deploy/forgejo-actions-orchestrator@.service $RAW/deploy/providers.example.conf $RAW/config.example.toml
 
-   # 1. Create necessary files
-   #  If using downloaded binary:
-   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main/deploy/forgejo-actions-orchestrator@.service
    install -Dm644 forgejo-actions-orchestrator@.service /etc/systemd/system/forgejo-actions-orchestrator@.service
-   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main/deploy/providers.example.conf
-   install -Dm644 providers.example.conf /etc/systemd/system/forgejo-actions-orchestrator@MYSITE.service.d/providers.conf
-   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/raw/branch/main/config.example.toml
-
-   #  If building from source:
-   install -Dm644 deploy/forgejo-actions-orchestrator@.service /etc/systemd/system/forgejo-actions-orchestrator@.service
-   install -Dm644 deploy/providers.example.conf /etc/systemd/system/forgejo-actions-orchestrator@MYSITE.service.d/providers.conf
-
-   # 2. Edit /etc/systemd/system/forgejo-actions-orchestrator@MYSITE.service.d/providers.conf
-   #  Keep only providers you use, otherwise you'd be getting 243/CREDENTIALS errors
-
-   # 3. Configure the daemon
-   install -Dm644 config.example.toml /etc/forgejo-actions-orchestrator/MYSITE.toml
-   # Edit /etc/forgejo-actions-orchestrator/MYSITE.toml
+   install -Dm644 providers.example.conf /etc/systemd/system/forgejo-actions-orchestrator@example.service.d/providers.conf
+   install -Dm644 config.example.toml /etc/forgejo-actions-orchestrator/example.toml
    ```
 
-   - `forgejo.url` — your instance
-   - `[[repo]]` — list only repositories with Actions enabled; every poll of a repo without it 404s
-   - each label's `image` — confirm the snapshot id still exists; nothing pre-flights it
+   In `providers.conf`, delete the lines for providers you don't use.
 
-   Every job names a label **set**, matched exactly against one `[[label]]` block. That block decides
-   the provider, the plans to try, the locations, and the image. Either a pre-baked snapshot, which
-   boots fastest but versions the toolchain outside the repository and only works on Hetzner, or a
-   stock OS image plus a setup step, which is slower but versions the environment with the code.
+   In `example.toml`, set:
 
-3. Set credentials
+   - `forgejo.url`
+   - a `[[repo]]` per repository, only ones with Actions enabled
+   - a `[[label]]` per `runs-on` label set, matched in any order
+   - each label's `image`, checking that a snapshot id still exists
 
-   One file per secret, `0400 root:root`, passed by systemd `LoadCredential=`.
-   
+3. Create the credentials, one file per secret:
+
    ```sh
-   install -d -m700 /etc/forgejo-actions-orchestrator/credentials/my-site
-
+   install -d -m700 /etc/forgejo-actions-orchestrator/credentials/example
+   cd /etc/forgejo-actions-orchestrator/credentials/example
    umask 077
-   cd /etc/forgejo-actions-orchestrator/credentials/my-site
+
    printf %s 'TOKEN' > forgejo-runner-token
    printf %s 'TOKEN' > forgejo-status-token
-   
-   # To enable Hetzner:
+
+   # Only the providers you use
    printf %s 'TOKEN' > hetzner-token
-   
-   # To enable Vultr:
    printf %s 'TOKEN' > vultr-token
-   
-   # To enable CherryServers:
    printf %s 'TOKEN' > cherry-token
    printf %s 'ID'    > cherry-project-id
+   printf %s 'KEY'   > scaleway-token
+   printf %s 'ID'    > scaleway-project-id
+   printf %s 'TOKEN' > gcore-token
+   printf %s 'ID'    > gcore-project-id
 
    chmod 400 ./*
    ```
 
-   | Credential             | Scope                                                           |
-   | ---------------------- | --------------------------------------------------------------- |
-   | `forgejo-runner-token` | Owner-level. Registers and deletes runners, reads the job queue |
-   | `forgejo-status-token` | `write:repository`, publishes the provisioning status           |
-   | `hetzner-token`        | Read & Write, scoped to a project used only by CI               |
-   | `vultr-token`          | Vultr API, make sure host's IP is in the allowlist for token    |
-   | `cherry-token`         | Cherry Servers API key                                          |
-   | `cherry-project-id`    | Cherry Servers project ID                                       |
+   | File                                    | Contents                                                                  |
+   | --------------------------------------- | ------------------------------------------------------------------------- |
+   | `forgejo-runner-token`                  | Token of an org Owner. Registers runners, reads the job queue             |
+   | `forgejo-status-token`                  | Token with Write on the repositories. Posts commit statuses               |
+   | `hetzner-token`                         | Read & Write API token                                                    |
+   | `vultr-token`                           | API key, with the host's IP in its access control list                    |
+   | `cherry-token`, `cherry-project-id`     | API key and project ID                                                    |
+   | `scaleway-token`, `scaleway-project-id` | IAM API secret key with Instances and Block Storage write, and project ID |
+   | `gcore-token`, `gcore-project-id`       | Permanent API token and Cloud project ID                                  |
 
-   Issue Forgejo tokens in Settings → Applications → New token, `repository` set to **Read and write**. The runner token needs the org's **Owners** team, the status token only needs **Write** on the repo and is kept on a separate bot account because the runner token is owner-equivalent.
+   Issue Forgejo tokens in Settings → Applications → New token, `repository` set to **Read and write**.
+
+   The daemon destroys any machine whose name starts with `machine_prefix` and matches no label. Give it a cloud project, or on Vultr an account, that runs nothing else.
 
 ## Usage
 
 ```sh
 systemctl daemon-reload
-systemctl enable --now forgejo-actions-orchestrator@my-site
-journalctl -u forgejo-actions-orchestrator@my-site -f
+systemctl enable --now forgejo-actions-orchestrator@example
+journalctl -u forgejo-actions-orchestrator@example -f
 ```
 
-Healthy service only logs once on launch and doesn't repeat:
+On start it logs:
 
 ```
-INFO watching repos=["owner/repo"] labels=["check", "release", …] interval=15s
+INFO watching repos=["owner/repo"] labels=["check", "hetzner", "release"] interval=15s
 ```
 
-| Symptom                                                 | Cause                                                                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `243/CREDENTIALS`                                       | a `LoadCredential=` source file is missing — create it, or drop the line from the instance's `providers.conf` |
-| `Permission denied` reading config, restarting every 5s | config is not `0644`                                                                                          |
-| `poll_failed` with `HTTP 404`                           | repo not in the allowlist, or Actions disabled on it                                                          |
-| `poll_failed` with `HTTP 403`                           | runner token is not org-Owner                                                                                 |
+After that it only logs machines created and destroyed, refused jobs and errors.
 
-Do **not** disable a provider by deleting its `[[label]]` while machines are live — that removes it from the survey and they are never destroyed. Stop the daemon and delete them by hand instead.
+| Symptom                                                 | Cause                                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `243/CREDENTIALS`                                       | a credential file is missing. Create it or remove the provider from `providers.conf` |
+| `is LoadCredential=… missing from the unit?`            | a `[[label]]` uses a provider that `providers.conf` is missing                       |
+| `Permission denied` reading config, restarting every 5s | config is not `0644` mode                                                            |
+| `poll_failed` with `HTTP 404`                           | wrong `[[repo]]` owner or name, or Actions disabled on it                            |
+| `poll_failed` with `HTTP 403`                           | runner token is not an org Owner                                                     |
+| `held back: this provider's machines are not visible`   | the provider API failed to list machines, see the `poll_failed` before it            |
+| `runner … is not ephemeral`                             | Forgejo is too old to register ephemeral runners                                     |
 
-## How a job gets a machine
+If machines are running when you edit the config:
 
-1. Daemon checks every provider for machines it owns, matched by the `ci-orc-` name prefix
-2. Poll each allowlisted repository for queued jobs
-3. Destroy machines past `lifetime_minutes`, and machines whose job has left the queue
-4. Delete runner registrations whose machine has been absent from two consecutive surveys
-5. Provision a machine for each newly queued job, up to the label's `max_vms`
+- Removing a provider's last `[[label]]`, removing a Scaleway or Gcore location, or changing `machine_prefix` makes the daemon lose track of those machines. They keep billing until you delete them by hand.
+- Removing or renaming a label destroys its machines, even mid-job, if the provider still has other labels.
 
-Cloud-init writes the runner config and `boot.sh` to the new machine. `boot.sh` downloads the Forgejo runner, verifies it against the SHA-256 you pinned, and starts it under `systemd-run` as `one-job --wait`.
-
-The daemon is what reclaims the machine: once the job leaves the queue, two consecutive polls confirm it and step 3 destroys it. Cloud-init also arms a `poweroff` at `lifetime_minutes`, but that is only a backstop for a machine the daemon never reached — a powered-off machine still bills, so the delete is what stops the meter.
-
-Teardown is running based on step 1 survey, a lingering VM is destroyed even after the daemon restarts. If a provider's API cannot be read, that provider is marked blind and its machines are left alone rather than being destroyed on incomplete information.
+> [!INFO] How a job gets a machine
+> Every `poll_interval_secs` the daemon:
+> 
+> 1. Lists each provider's machines whose names start with `machine_prefix`
+> 2. Polls each `[[repo]]` for queued and running jobs
+> 3. Destroys machines older than `lifetime_minutes` plus `reconcile_grace_secs`, and machines whose job was absent from the last two polls
+> 4. Deletes the runner registration of any machine absent from the last two listings and gone for at least `reconcile_grace_secs`
+> 5. Registers an ephemeral runner for each new queued job and creates its machine, up to the label's `max_vms`. It tries every plan in every location, in order, and reports the outcome as a commit status.
+> 
+> Cloud-init writes the runner config and `boot.sh` to the machine. `boot.sh` downloads the Forgejo runner, checks it against your pinned SHA-256 and runs it for that one job. Cloud-init also powers the machine off after `lifetime_minutes`, but a powered-off machine keeps billing until the daemon destroys it.
+> 
+> The daemon finds machines by listing them from the provider, so it also cleans up machines created before a restart. If a provider's API fails, the daemon leaves that provider's machines alone and holds back its jobs until the API recovers.
 
 ## Known gaps
 
-- A stock image must provide `bash`, `sha256sum`, `systemd-run` and apt; `boot.sh` covers the rest
-- One repository failing to poll suppresses teardown for every repository until it recovers
-- A job that never gets picked up keeps its machine until `lifetime_minutes`, and blocks its label
+- Images need cloud-init, `bash`, `sha256sum` and `systemd-run`, plus curl and git or apt to install them. Only x86_64 and aarch64 work.
+- If any repository fails to poll, the daemon stops destroying machines of finished jobs in every repository until polling works again. `lifetime_minutes` still applies.
+- A job the runner never picks up, for example after a checksum mismatch, gets a new machine every `lifetime_minutes` until you cancel it.
+- Scaleway and Gcore bill the 80 GB boot volume separately, and nothing sweeps a volume that a failed delete leaves behind. Check block storage after a Scaleway `sweep_failed` alert. Gcore deletes volumes in a background task the daemon never checks, so look at its volume list now and then.
 
 ## License
 

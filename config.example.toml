@@ -1,7 +1,7 @@
 [forgejo]
 url = "https://git.example.org"
 
-#! Only repositories listed here are polled, a repo without Actions enabled 404s every poll
+#! Only repositories with Actions enabled. A repo that fails to poll delays teardown for all of them.
 [[repo]]
 owner = "example"
 name = "example"
@@ -12,36 +12,44 @@ name = "example"
 
 [daemon]
 poll_interval_secs = 15
+#! Extra time past lifetime_minutes before an overdue machine is destroyed
 reconcile_grace_secs = 300
+#! Without the "v"
 runner_version = "12.13.2"
+#! SHA-256 of forgejo-runner-<version>-linux-<arch>
 runner_sha256_amd64 = "2b4c3751fc2f9a60f753ef97414949de25587dfa2b921870b0cb6cb7c9bf7080"
 runner_sha256_arm64 = "21ae372961bc96b68ac91ceafb6bb1b0ea2493c22ffe24988f7cf578f5fbe58f"
+#! The daemon owns every machine whose name starts with this. Orchestrators sharing
+#! a cloud account need prefixes that aren't prefixes of each other, e.g. not "ci" and "ci-orc".
 machine_prefix = "ci-orc"
 
-#! Optional. POST {kind, subject, detail, consecutive}
+#! Optional. POSTs {kind, subject, detail, consecutive}, repeats at most every 15 minutes
 # [alert]
 # webhook_url = "https://git.example.org/_hooks/ci-orchestrator"
 
-#! See pricing plans for all supported providers as of 2026-09-01 at the end of the file.
+#! See plan prices as of 2026-09-01 at the end of the file.
 
 #! ========== Pull request checks ==========
-#! A job is matched exactly against a [[label]] by its label set
 
+#! A job runs here when its runs-on equals labels, in any order
 [[label]]
 labels = ["check", "hetzner"]
 provider = "hetzner"
+#! Each plan is tried in every location, in order
 plans = ["cx43", "cx53", "cpx42"]
 locations = ["fsn1", "nbg1", "hel1"]
-#! A pre-baked snapshot id
+#! Snapshot id
 image = "000000000"
+#! Hetzner: key name or id. Vultr: key id. Gcore: key pair name. Scaleway: leave unset.
 # ssh_key = "..."
 max_vms = 1
 lifetime_minutes = 90
-#! Job time from runner startup, so leave room for boot. Unlike a workflow's own
-#! timeout-minutes, a pull request cannot raise it. Defaults to lifetime_minutes.
+#! Counted from runner start, so leave room for boot. Must be less than
+#! lifetime_minutes. Unlike timeout-minutes, a pull request cannot raise it.
 job_timeout_minutes = 60
-#! allow_fork_pull_request = true because this label reaches no secret
+#! This label reaches no secrets
 allow_fork_pull_request = true
+#! Cron runs are "schedule", manual runs "workflow_dispatch"
 allowed_events = ["pull_request", "pull_request_target", "workflow_dispatch"]
 
 #! ============== Releases ==============
@@ -54,20 +62,19 @@ locations = ["fsn1", "nbg1", "hel1"]
 image = "debian-12"
 max_vms = 1
 lifetime_minutes = 90
-#! allow_fork_pull_request = false because jobs can read a signing key or publish token
+#! Jobs here can read signing keys and publish tokens
 allow_fork_pull_request = false
 allowed_events = ["push", "workflow_dispatch"]
 
 #! ========== Other providers ==========
-#! Vultr takes a numeric os_id and Cherry an OS slug, so neither can boot a snapshot.
 
 # [[label]]
 # labels = ["build", "vultr"]
 # provider = "vultr"
-#! vhp-8c-16gb-amd: 8 shared vCPUs, 16 GB RAM, $0.132/hr
+#! vhp-8c-16gb-amd: 8 shared vCPU, 16 GB RAM, $0.132/hr
 # plans = ["vhp-8c-16gb-amd"]
 # locations = ["ams", "fra", "cdg", "waw", "ewr", "ord", "dfw", "lax", "sgp"]
-#! 2136: Debian 12 x64
+#! os_id 2136 is Debian 12 x64
 # image = "2136"
 # lifetime_minutes = 90
 # allowed_events = ["push", "workflow_dispatch"]
@@ -75,18 +82,19 @@ allowed_events = ["push", "workflow_dispatch"]
 # [[label]]
 # labels = ["build", "cherry"]
 # provider = "cherry"
-#! G1-8-32gb-200nv-ded: 8 dedicated vCPUs, 32 GB RAM, €0.184/hr
+#! G1-8-32gb-200nv-ded: 8 dedicated vCPU, 32 GB RAM, €0.152/hr
 # plans = ["G1-8-32gb-200nv-ded"]
 # locations = ["LT-Siauliai", "NL-Amsterdam", "US-Chicago", "SG-Singapore"]
 # image = "debian_12_64bit"
 # lifetime_minutes = 90
 # allowed_events = ["push", "workflow_dispatch"]
 
+#! Scaleway and Gcore bill an 80 GB boot volume on top of the plan price
+
 # [[label]]
 # labels = ["build-arm64", "scaleway"]
 # provider = "scaleway"
-#! BASIC2-A8C-16G: 8 arm64 vCPUs (Ampere), 16 GB RAM, EUR 0.1034/hr.
-#! The A6C/A12C/A24C sizes are orderable but no marketplace image is compatible with them.
+#! BASIC2-A8C-16G: 8 arm64 vCPU, 16 GB RAM, €0.1034/hr
 # plans = ["BASIC2-A8C-16G"]
 # locations = ["fr-par-1", "fr-par-2", "nl-ams-1"]
 # image = "debian_bookworm"
@@ -96,17 +104,12 @@ allowed_events = ["push", "workflow_dispatch"]
 # [[label]]
 # labels = ["build-arm64", "gcore"]
 # provider = "gcore"
-#! a1-standard-8-16: 8 arm64 vCPUs (Ampere), 16 GB RAM, USD 0.106/hr.
+#! a1-standard-8-16: 8 arm64 vCPU, 16 GB RAM, €0.10612/hr in Tokyo
 # plans = ["a1-standard-8-16"]
-#! Numeric region ids, not names: 30 is Tokyo. a1-* is not offered in every region.
+#! Region 30 is Tokyo. Not every region sells a1-standard.
 # locations = ["30"]
-#! debian-12-generic-arm64-qcow2. Image ids are region-scoped, re-look it up per region.
+#! debian-12-generic-arm64-qcow2 in region 30. Every region has its own image ids.
 # image = "d52b7e87-50f2-4ad0-a5f8-8b9f80591384"
-
-#! Scaleway and Gcore bill the boot volume separately from the instance, from creation until
-#! deletion, and destroy deletes the instance first. If the volume delete then fails the daemon
-#! logs the zone and volume id, but no later sweep can see an orphan: check the provider's block
-#! storage list after any destroy that alerted.
 # lifetime_minutes = 90
 # allowed_events = ["workflow_dispatch"]
 
