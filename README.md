@@ -126,7 +126,9 @@ If machines are running when you edit the config:
 - Removing a provider's last `[[label]]`, removing a Scaleway or Gcore location, or changing `machine_prefix` makes the daemon lose track of those machines. They keep billing until you delete them by hand.
 - Removing or renaming a label destroys its machines, even mid-job, if the provider still has other labels.
 
-> [!Note] How a job gets a machine
+> [!NOTE]
+> **How a job gets a machine**
+> 
 > Every `poll_interval_secs` the daemon:
 > 
 > 1. Lists each provider's machines whose names start with `machine_prefix`
