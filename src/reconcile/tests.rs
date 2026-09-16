@@ -308,6 +308,64 @@ async fn destroys_a_machine_no_label_explains() {
 		);
 }
 
+fn under_an_old_label(handle: &str, minutes: i64) -> Machine {
+	Machine {
+		id: format!("id-{handle}"),
+		name: format!("{}-gone-label-{handle}", naming::DEFAULT_PREFIX),
+		created_at: Some(
+			OffsetDateTime::now_utc() - time::Duration::minutes(minutes),
+		),
+	}
+}
+
+#[tokio::test]
+async fn a_label_rename_does_not_destroy_a_machine_mid_job() {
+	let queue = FakeQueue {
+		jobs: Ok(vec![job("busy")]),
+		..Default::default()
+	};
+	let fleet = FakeFleet::with(vec![under_an_old_label("busy", 0)]);
+	let mut orc = orchestrator(queue, fleet);
+	orc.tick().await;
+	orc.tick().await;
+	orc.tick().await;
+	assert!(
+		orc.clouds.destroyed.lock().unwrap().is_empty(),
+		"renaming a label must not kill the machine its job is running on"
+	);
+}
+
+#[tokio::test]
+async fn a_label_rename_does_not_provision_a_second_machine() {
+	let queue = FakeQueue {
+		jobs: Ok(vec![job("busy")]),
+		..Default::default()
+	};
+	let fleet = FakeFleet::with(vec![under_an_old_label("busy", 0)]);
+	let mut orc = orchestrator(queue, fleet);
+	orc.tick().await;
+	assert!(
+		orc.clouds.created.lock().unwrap().is_empty(),
+		"the old machine still serves this handle"
+	);
+}
+
+#[tokio::test]
+async fn a_machine_no_label_explains_still_expires() {
+	let queue = FakeQueue {
+		jobs: Ok(vec![job("busy")]),
+		..Default::default()
+	};
+	let fleet = FakeFleet::with(vec![under_an_old_label("busy", 200)]);
+	let mut orc = orchestrator(queue, fleet);
+	orc.tick().await;
+	assert_eq!(
+		orc.clouds.destroyed.lock().unwrap().as_slice(),
+		["id-busy"],
+		"a live handle must not make an unparseable machine immortal"
+	);
+}
+
 #[tokio::test]
 async fn provisions_for_a_queued_job() {
 	let queue = FakeQueue {

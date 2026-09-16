@@ -243,6 +243,14 @@ impl Config {
 		self.labels.iter().map(Label::name).collect()
 	}
 
+	pub fn longest_lifetime_minutes(&self) -> u64 {
+		self.labels
+			.iter()
+			.map(|label| label.lifetime_minutes)
+			.max()
+			.unwrap_or_else(default_lifetime_minutes)
+	}
+
 	pub fn poll_interval(&self) -> Duration {
 		Duration::from_secs(self.daemon.poll_interval_secs)
 	}

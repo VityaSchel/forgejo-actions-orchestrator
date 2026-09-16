@@ -33,11 +33,22 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			naming::split(&prefix, name, names)
 				.map(|(_, handle)| handle.to_owned())
 		}));
+		let in_flight: Vec<String> = survey
+			.fleet
+			.iter()
+			.map(|(_, machine)| machine.name.clone())
+			.chain(self.unseen.keys().cloned())
+			.collect();
 
 		let mut pending: HashMap<String, usize> = HashMap::new();
 
 		for entry in queued.iter().filter(|e| e.job.status == "waiting") {
-			if !served.insert(naming::truncated_handle(&entry.job.handle)) {
+			let handle = naming::truncated_handle(&entry.job.handle);
+			if !served.insert(handle.clone()) {
+				continue;
+			}
+			let tail = format!("-{handle}");
+			if in_flight.iter().any(|name| name.ends_with(&tail)) {
 				continue;
 			}
 			if let Err(error) =

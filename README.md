@@ -124,7 +124,7 @@ After that it only logs machines created and destroyed, refused jobs and errors.
 If machines are running when you edit the config:
 
 - Removing a provider's last `[[label]]`, removing a Scaleway or Gcore location, or changing `machine_prefix` makes the daemon lose track of those machines. They keep billing until you delete them by hand.
-- Removing or renaming a label destroys its machines, even mid-job, if the provider still has other labels.
+- Removing or renaming a label destroys its idle machines once their job leaves the queue. A machine whose job is still queued or running survives the rename and is capped by the longest `lifetime_minutes` in the config.
 
 > [!NOTE]
 > **How a job gets a machine**

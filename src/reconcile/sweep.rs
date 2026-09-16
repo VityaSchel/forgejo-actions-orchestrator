@@ -20,6 +20,12 @@ const MISSES_BEFORE_DESTROY: u32 = 2;
 /// One listing without the machine is never proof it is gone
 const MISSES_BEFORE_REAP: u32 = 2;
 
+/// Survives a label rename: the label half of the name is gone, the handle is not
+fn serves_a_live_job(name: &str, live: &HashSet<String>) -> bool {
+	live.iter()
+		.any(|handle| name.ends_with(&format!("-{handle}")))
+}
+
 impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 	pub(super) async fn destroy_departed(
 		&mut self,
@@ -39,6 +45,10 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 					continue;
 				}
 				Some(_) => {}
+				None if serves_a_live_job(&machine.name, &live) => {
+					self.missed_polls.remove(&machine.name);
+					continue;
+				}
 				None => {
 					self.alerts
 						.raise(
@@ -68,9 +78,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		labels: &[String],
 	) {
 		for (kind, machine) in &survey.fleet {
-			let Some(limit) = self.lifetime_of(&machine.name, labels) else {
-				continue;
-			};
+			let limit = self.lifetime_of(&machine.name, labels);
 			let age = self.age_of(machine);
 			if age <= limit {
 				continue;
@@ -111,9 +119,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			.cloned()
 			.collect();
 		for (kind, machine) in stale {
-			let Some(limit) = self.lifetime_of(&machine.name, labels) else {
-				continue;
-			};
+			let limit = self.lifetime_of(&machine.name, labels);
 			if self.age_of(&machine) <= limit {
 				continue;
 			}
@@ -126,14 +132,15 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 		}
 	}
 
-	fn lifetime_of(&self, name: &str, labels: &[String]) -> Option<Duration> {
-		let (label, _) =
-			naming::split(self.config.machine_prefix(), name, labels)?;
-		let label = self.config.label(label)?;
-		Some(
-			Duration::from_secs(label.lifetime_minutes * 60)
-				+ self.config.reconcile_grace(),
-		)
+	/// A renamed-away label parses as nothing, so fall back rather than never expire
+	fn lifetime_of(&self, name: &str, labels: &[String]) -> Duration {
+		let minutes = naming::split(self.config.machine_prefix(), name, labels)
+			.and_then(|(label, _)| self.config.label(label))
+			.map_or_else(
+				|| self.config.longest_lifetime_minutes(),
+				|label| label.lifetime_minutes,
+			);
+		Duration::from_secs(minutes * 60) + self.config.reconcile_grace()
 	}
 
 	fn age_of(&mut self, machine: &Machine) -> Duration {
