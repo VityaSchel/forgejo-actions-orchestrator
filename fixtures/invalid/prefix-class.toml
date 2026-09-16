@@ -46,7 +46,7 @@ job_timeout_minutes = 70
 allowed_events = ["push", "workflow_dispatch"]
 
 [[machine]]
-labels = ["hetzner"]
+labels = ["check", "hetzner", "extra"]
 image = "debian"
 plans = "4c8g"
 lifetime_minutes = 60
@@ -54,7 +54,7 @@ job_timeout_minutes = 40
 allowed_events = ["push"]
 
 [repo."acme/widgets"]
-max_vms = { hetzner = 2, linode = 1 }
+max_vms = { hetzner = 2, cherry = 1 }
 
 [repo."acme/gadgets"]
 max_vms = { hetzner = 1 }

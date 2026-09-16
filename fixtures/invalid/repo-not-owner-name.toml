@@ -53,8 +53,8 @@ lifetime_minutes = 60
 job_timeout_minutes = 40
 allowed_events = ["push"]
 
-[repo."acme/widgets"]
-max_vms = { hetzner = 2, linode = 1 }
+[repo."widgets"]
+max_vms = { hetzner = 2, cherry = 1 }
 
 [repo."acme/gadgets"]
 max_vms = { hetzner = 1 }

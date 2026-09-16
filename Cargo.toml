@@ -1,6 +1,6 @@
 [package]
 name = "forgejo-actions-orchestrator"
-version = "1.1.5"
+version = "1.2.0"
 rust-version = "1.86"
 description = "Gives each queued Forgejo Actions job a disposable virtual machine"
 authors = ["Viktor Shchelochkov <hi@hloth.dev>"]

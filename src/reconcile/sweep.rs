@@ -135,10 +135,10 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 	/// A renamed-away label parses as nothing, so fall back rather than never expire
 	fn lifetime_of(&self, name: &str, labels: &[String]) -> Duration {
 		let minutes = naming::split(self.config.machine_prefix(), name, labels)
-			.and_then(|(label, _)| self.config.label(label))
+			.and_then(|(class, _)| self.config.class(class))
 			.map_or_else(
 				|| self.config.longest_lifetime_minutes(),
-				|label| label.lifetime_minutes,
+				|class| class.lifetime_minutes,
 			);
 		Duration::from_secs(minutes * 60) + self.config.reconcile_grace()
 	}

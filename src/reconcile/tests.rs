@@ -165,23 +165,25 @@ impl Fleet for FakeFleet {
 	}
 }
 
+const CLASS: &str = "check-hetzner";
+
 fn job(handle: &str) -> Job {
 	labelled_job(handle, "check")
 }
 
-fn labelled_job(handle: &str, label: &str) -> Job {
+fn labelled_job(handle: &str, purpose: &str) -> Job {
 	Job {
 		run_id: 1,
 		handle: handle.into(),
 		status: "waiting".into(),
-		runs_on: vec![label.into()],
+		runs_on: vec![purpose.into(), "hetzner".into()],
 	}
 }
 
 fn machine(handle: &str) -> Machine {
 	Machine {
 		id: format!("id-{handle}"),
-		name: naming::machine_name(naming::DEFAULT_PREFIX, "check", handle),
+		name: naming::machine_name(naming::DEFAULT_PREFIX, CLASS, handle),
 		created_at: Some(OffsetDateTime::now_utc()),
 	}
 }
@@ -377,7 +379,7 @@ async fn provisions_for_a_queued_job() {
 	orc.tick().await;
 	assert_eq!(
 		orc.clouds.created.lock().unwrap().as_slice(),
-		[naming::machine_name(naming::DEFAULT_PREFIX, "check", "new")]
+		[naming::machine_name(naming::DEFAULT_PREFIX, CLASS, "new")]
 	);
 }
 
@@ -394,8 +396,9 @@ async fn does_not_provision_twice_for_the_same_job() {
 }
 
 #[tokio::test]
-async fn respects_the_per_label_machine_cap() {
+async fn respects_the_repository_grant() {
 	let queue = FakeQueue {
+		repo: repo("gadgets"),
 		jobs: Ok(vec![job("a"), job("b")]),
 		..Default::default()
 	};
@@ -404,7 +407,7 @@ async fn respects_the_per_label_machine_cap() {
 	orc.tick().await;
 	assert!(
 		orc.clouds.created.lock().unwrap().is_empty(),
-		"max_vms = 1 but a second machine was created"
+		"acme/gadgets is granted one hetzner machine but a second was created"
 	);
 }
 
@@ -432,7 +435,7 @@ async fn deletes_a_runner_record_with_no_machine() {
 			id: 42,
 			name: naming::machine_name(
 				naming::DEFAULT_PREFIX,
-				"check",
+				CLASS,
 				"vanished",
 			),
 			ephemeral: true,
@@ -452,7 +455,7 @@ async fn deletes_a_runner_record_with_no_machine() {
 
 #[tokio::test]
 async fn keeps_a_runner_whose_machine_the_provider_has_not_listed_yet() {
-	let name = naming::machine_name(naming::DEFAULT_PREFIX, "check", "fresh");
+	let name = naming::machine_name(naming::DEFAULT_PREFIX, CLASS, "fresh");
 	let queue = FakeQueue {
 		jobs: Ok(vec![]),
 		runners: vec![Runner {
@@ -480,8 +483,7 @@ async fn keeps_a_runner_whose_machine_the_provider_has_not_listed_yet() {
 
 #[tokio::test]
 async fn keeps_a_runner_whose_provider_lists_the_machine_minutes_late() {
-	let name =
-		naming::machine_name(naming::DEFAULT_PREFIX, "check", "slowlist");
+	let name = naming::machine_name(naming::DEFAULT_PREFIX, CLASS, "slowlist");
 	let queue = FakeQueue {
 		jobs: Ok(vec![]),
 		runners: vec![Runner {
@@ -636,15 +638,15 @@ async fn polls_only_allowlisted_repositories() {
 
 	assert_eq!(
 		*orchestrator.forgejo.polled.lock().unwrap(),
-		vec!["acme/widgets", "acme/gadgets"]
+		vec!["acme/gadgets", "acme/widgets"]
 	);
 }
 
 #[tokio::test]
 async fn provisions_for_every_allowlisted_repository() {
 	let queue = FakeQueue {
-		jobs: Ok(vec![labelled_job("A", "roomy")]),
-		elsewhere: vec![labelled_job("B", "roomy")],
+		jobs: Ok(vec![job("A")]),
+		elsewhere: vec![job("B")],
 		..Default::default()
 	};
 	let mut orchestrator = orchestrator(queue, FakeFleet::with(Vec::new()));
@@ -654,8 +656,8 @@ async fn provisions_for_every_allowlisted_repository() {
 	assert_eq!(
 		created,
 		vec![
-			naming::machine_name(naming::DEFAULT_PREFIX, "roomy", "A"),
-			naming::machine_name(naming::DEFAULT_PREFIX, "roomy", "B")
+			naming::machine_name(naming::DEFAULT_PREFIX, CLASS, "B"),
+			naming::machine_name(naming::DEFAULT_PREFIX, CLASS, "A")
 		]
 	);
 }
@@ -674,7 +676,7 @@ async fn registers_the_runner_in_the_repository_that_asked_for_it() {
 		*orchestrator.forgejo.registered.lock().unwrap(),
 		vec![(
 			"acme/gadgets".to_string(),
-			naming::machine_name(naming::DEFAULT_PREFIX, "check", "B")
+			naming::machine_name(naming::DEFAULT_PREFIX, CLASS, "B")
 		)]
 	);
 }
@@ -707,13 +709,14 @@ async fn provisions_once_for_a_handle_listed_twice() {
 
 	assert_eq!(
 		*orchestrator.clouds.created.lock().unwrap(),
-		vec![naming::machine_name(naming::DEFAULT_PREFIX, "check", "A")]
+		vec![naming::machine_name(naming::DEFAULT_PREFIX, CLASS, "A")]
 	);
 }
 
 #[tokio::test]
-async fn the_machine_cap_counts_machines_made_earlier_in_the_same_tick() {
+async fn the_grant_counts_machines_made_earlier_in_the_same_tick() {
 	let queue = FakeQueue {
+		repo: repo("gadgets"),
 		jobs: Ok(vec![job("a"), job("b")]),
 		..Default::default()
 	};
@@ -723,13 +726,13 @@ async fn the_machine_cap_counts_machines_made_earlier_in_the_same_tick() {
 	assert_eq!(
 		orchestrator.clouds.created.lock().unwrap().len(),
 		1,
-		"max_vms = 1, but the tick-start snapshot showed an empty fleet for both jobs"
+		"the grant is one, but the tick-start snapshot showed an empty fleet for both jobs"
 	);
 	let statuses = orchestrator.forgejo.statuses.lock().unwrap().clone();
 	assert!(
-		statuses
-			.iter()
-			.any(|(_, d)| d.contains("already has 1 machine(s) running")),
+		statuses.iter().any(
+			|(_, d)| d.contains("already has 1 hetzner machine(s) running")
+		),
 		"the second job should be told why it was refused: {statuses:?}"
 	);
 }
@@ -802,5 +805,24 @@ async fn a_running_job_keeps_its_machine() {
 	assert!(
 		orc.clouds.created.lock().unwrap().is_empty(),
 		"a running job must not be provisioned a second machine"
+	);
+}
+
+#[tokio::test]
+async fn a_rename_must_not_double_the_quota() {
+	let queue = FakeQueue {
+		jobs: Ok(vec![job("one"), job("two"), job("three")]),
+		..Default::default()
+	};
+	let fleet = FakeFleet::with(vec![
+		under_an_old_label("one", 0),
+		under_an_old_label("two", 0),
+	]);
+	let mut orc = orchestrator(queue, fleet);
+	orc.tick().await;
+	let created = orc.clouds.created.lock().unwrap().clone();
+	assert!(
+		created.is_empty(),
+		"acme/widgets is granted 2 hetzner machines and 2 already serve it, but created {created:?}"
 	);
 }

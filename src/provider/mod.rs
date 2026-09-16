@@ -4,14 +4,14 @@ mod hetzner;
 mod scaleway;
 mod vultr;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use anyhow::{bail, Context, Result};
 
-use crate::config::{Label, Provider as Kind};
+use crate::config::{Class, Host, Provider as Kind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Machine {
@@ -152,13 +152,11 @@ pub struct Clouds {
 }
 
 impl Clouds {
-	pub fn from_env(labels: &[Label]) -> Result<Self> {
+	pub fn from_env(providers: &BTreeMap<Kind, Host>) -> Result<Self> {
 		let mut backends = HashMap::new();
-		for kind in labels.iter().map(|label| label.provider) {
-			if backends.contains_key(&kind) {
-				continue;
-			}
-			let locations = locations_for(labels, kind);
+		for (kind, host) in providers {
+			let kind = *kind;
+			let locations = host.locations.clone();
 			let backend = match kind {
 				Kind::Cherry => Backend::Cherry(cherry::Cherry::from_env()?),
 				Kind::Gcore => {
@@ -184,22 +182,9 @@ impl Clouds {
 	}
 }
 
-/// Zone-scoped APIs have no global list endpoint, so those backends sweep every
-/// location their labels name.
-fn locations_for(labels: &[Label], kind: Kind) -> Vec<String> {
-	let mut locations: Vec<String> = labels
-		.iter()
-		.filter(|label| label.provider == kind)
-		.flat_map(|label| label.locations.iter().cloned())
-		.collect();
-	locations.sort();
-	locations.dedup();
-	locations
-}
-
-pub fn placements(label: &Label) -> impl Iterator<Item = Placement> + '_ {
-	label.plans.iter().flat_map(move |plan| {
-		label.locations.iter().map(move |location| Placement {
+pub fn placements(class: &Class) -> impl Iterator<Item = Placement> + '_ {
+	class.plans.iter().flat_map(move |plan| {
+		class.locations.iter().map(move |location| Placement {
 			plan: plan.clone(),
 			location: location.clone(),
 		})
@@ -269,42 +254,33 @@ mod tests {
 
 	use crate::config::Provider;
 
-	fn label() -> Label {
-		Label {
-			labels: vec!["check".into()],
+	fn class(
+		purpose: &str,
+		plans: Vec<String>,
+		locations: Vec<String>,
+	) -> Class {
+		Class {
+			labels: vec![purpose.into(), "hetzner".into()],
 			provider: Provider::Hetzner,
-			plans: vec!["cx43".into(), "cpx42".into()],
-			locations: vec!["fsn1".into(), "nbg1".into()],
+			plans,
+			locations,
 			image: "snapshot".into(),
 			ssh_key: None,
-			max_vms: 1,
 			lifetime_minutes: 90,
-			job_timeout_minutes: None,
-			allow_fork_pull_request: true,
+			job_timeout_minutes: 70,
 			allowed_events: vec!["pull_request".into()],
+			allow_fork_pull_request: true,
 		}
 	}
 
 	#[test]
-	fn gathers_deduplicated_locations_per_provider() {
-		let mut second = label();
-		second.locations = vec!["nbg1".into(), "hel1".into()];
-		let mut other = label();
-		other.provider = Provider::Vultr;
-		other.locations = vec!["ams".into()];
-		let labels = vec![label(), second, other];
-		assert_eq!(
-			locations_for(&labels, Provider::Hetzner),
-			vec!["fsn1", "hel1", "nbg1"]
-		);
-		assert_eq!(locations_for(&labels, Provider::Vultr), vec!["ams"]);
-		assert!(locations_for(&labels, Provider::Gcore).is_empty());
-	}
-
-	#[test]
 	fn walks_every_plan_against_every_location() {
-		let label = label();
-		let combos: Vec<_> = placements(&label)
+		let class = class(
+			"check",
+			vec!["cx43".into(), "cpx42".into()],
+			vec!["fsn1".into(), "nbg1".into()],
+		);
+		let combos: Vec<_> = placements(&class)
 			.map(|p| format!("{}/{}", p.plan, p.location))
 			.collect();
 		assert_eq!(

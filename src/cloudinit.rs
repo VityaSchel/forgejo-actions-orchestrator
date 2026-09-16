@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::config::{Daemon, Label};
+use crate::config::{Class, Daemon};
 use crate::forgejo::Registration;
 
 const BOOT: &str = include_str!("boot.sh");
@@ -63,7 +63,7 @@ fn runner_url(version: &str, arch: &str) -> String {
 
 pub fn render(
 	daemon: &Daemon,
-	label: &Label,
+	class: &Class,
 	forgejo_url: &str,
 	registration: &Registration,
 	handle: &str,
@@ -77,7 +77,7 @@ pub fn render(
 			WriteFile::readable("runner-uuid", registration.uuid.clone()),
 			WriteFile::readable(
 				"runner-labels",
-				label
+				class
 					.labels
 					.iter()
 					.map(|one| format!("{one}:host\n"))
@@ -86,7 +86,7 @@ pub fn render(
 			WriteFile::readable("job-handle", handle.to_owned()),
 			WriteFile::readable(
 				"runner-config.yml",
-				format!("runner:\n  timeout: {}m\n", label.job_timeout()),
+				format!("runner:\n  timeout: {}m\n", class.job_timeout()),
 			),
 			WriteFile::readable(
 				"runner-url-amd64",
@@ -108,7 +108,7 @@ pub fn render(
 		runcmd: vec![vec!["bash".to_owned(), format!("{ETC}/boot.sh")]],
 		power_state: PowerState {
 			mode: "poweroff",
-			delay: label.lifetime_minutes,
+			delay: class.lifetime_minutes,
 			condition: true,
 		},
 	};
@@ -136,19 +136,18 @@ mod tests {
 		}
 	}
 
-	fn label() -> Label {
-		Label {
-			labels: vec!["check".into()],
+	fn class() -> Class {
+		Class {
+			labels: vec!["check".into(), "hetzner".into()],
 			provider: Provider::Hetzner,
 			plans: vec!["cx43".into()],
 			locations: vec!["fsn1".into()],
 			image: "snapshot-1".into(),
 			ssh_key: None,
-			max_vms: 1,
 			lifetime_minutes: 90,
-			job_timeout_minutes: None,
-			allow_fork_pull_request: true,
+			job_timeout_minutes: 70,
 			allowed_events: vec!["pull_request".into()],
+			allow_fork_pull_request: true,
 		}
 	}
 
@@ -166,7 +165,7 @@ mod tests {
 	) -> serde_json::Value {
 		let text = render(
 			&daemon(),
-			&label(),
+			&class(),
 			"https://git.example.org",
 			registration,
 			handle,
@@ -191,7 +190,7 @@ mod tests {
 	fn declares_itself_as_cloud_config() {
 		let text = render(
 			&daemon(),
-			&label(),
+			&class(),
 			"https://git.example.org",
 			&registration(),
 			"H1",
@@ -208,8 +207,8 @@ mod tests {
 
 	#[test]
 	fn writes_every_label_in_the_set_one_per_line() {
-		let mut multi = label();
-		multi.labels = vec!["build".into(), "hetzner".into()];
+		let mut multi = class();
+		multi.labels = vec!["build".into(), "8c16g".into(), "hetzner".into()];
 		let text = render(
 			&daemon(),
 			&multi,
@@ -224,15 +223,15 @@ mod tests {
 
 		assert_eq!(
 			file(&config, "runner-labels")["content"],
-			"build:host\nhetzner:host\n",
+			"build:host\n8c16g:host\nhetzner:host\n",
 			"a machine registered with a subset of the set never matches the job"
 		);
 	}
 
 	#[test]
 	fn the_boot_script_recovers_every_label_that_was_written() {
-		let mut multi = label();
-		multi.labels = vec!["build".into(), "hetzner".into()];
+		let mut multi = class();
+		multi.labels = vec!["build".into(), "8c16g".into(), "hetzner".into()];
 		let text = render(
 			&daemon(),
 			&multi,
@@ -271,7 +270,14 @@ mod tests {
 			String::from_utf8_lossy(&output.stdout)
 				.lines()
 				.collect::<Vec<_>>(),
-			vec!["--label", "build:host", "--label", "hetzner:host"],
+			vec![
+				"--label",
+				"build:host",
+				"--label",
+				"8c16g:host",
+				"--label",
+				"hetzner:host"
+			],
 			"stderr: {}",
 			String::from_utf8_lossy(&output.stderr)
 		);
@@ -311,7 +317,7 @@ mod tests {
 			file(&config, "runner-config.yml")["content"],
 			serde_json::json!(format!(
 				"runner:\n  timeout: {}m\n",
-				label().job_timeout()
+				class().job_timeout()
 			)),
 			"a hung job must lose its runner before the machine is destroyed"
 		);
@@ -429,7 +435,7 @@ mod tests {
 	fn fits_inside_the_smallest_provider_limit() {
 		let text = render(
 			&daemon(),
-			&label(),
+			&class(),
 			"https://git.example.org",
 			&registration(),
 			"H1",

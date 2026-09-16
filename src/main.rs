@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
 		secret::load("FORGEJO_RUNNER_TOKEN")?,
 		secret::load("FORGEJO_STATUS_TOKEN")?,
 	)?;
-	let clouds = provider::Clouds::from_env(&config.labels)?;
+	let clouds = provider::Clouds::from_env(&config.providers)?;
 	let alerts = alert::Alerts::new(
 		config.alert.as_ref().and_then(|a| a.webhook_url.clone()),
 	)?;

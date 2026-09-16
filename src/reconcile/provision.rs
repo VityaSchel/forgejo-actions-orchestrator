@@ -5,13 +5,13 @@ use tracing::{info, warn};
 
 use crate::alert::Kind;
 use crate::cloudinit;
-use crate::config::Label;
+use crate::config::{Class, Provider, Repo};
 use crate::forgejo::{self, Queue, StatusState};
 use crate::naming;
 use crate::policy::{self, JobRequest};
 use crate::provider::{placements, Fleet, Machine};
 
-use super::{Machines, Orchestrator, Queued, Survey};
+use super::{Orchestrator, Queued, Survey};
 
 impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 	pub(super) async fn provision_arrived(
@@ -52,7 +52,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 				continue;
 			}
 			if let Err(error) =
-				self.provision(entry, survey, names, &mut pending).await
+				self.provision(entry, queued, survey, &mut pending).await
 			{
 				self.alerts
 					.raise(
@@ -68,8 +68,8 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 	async fn provision(
 		&mut self,
 		entry: &Queued,
+		queued: &[Queued],
 		survey: &Survey,
-		names: &[String],
 		pending: &mut HashMap<String, usize>,
 	) -> Result<()> {
 		let Queued { repo, job } = entry;
@@ -82,8 +82,8 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			is_fork_pull_request: run.is_fork_pull_request,
 		};
 
-		let label = match policy::resolve(&self.config, &request) {
-			Ok(label) => label.clone(),
+		let class = match policy::resolve(&self.config, &request) {
+			Ok(class) => class.clone(),
 			Err(denial) => {
 				self.log_refusal(&job.handle, &denial.to_string());
 				self.report(
@@ -98,9 +98,12 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			}
 		};
 
-		let live = self.live_for_label(&label.name(), &survey.fleet, names)
-			+ pending.get(&label.name()).copied().unwrap_or(0);
-		if let Err(denial) = policy::admit(&label, &request, live) {
+		let quota = format!("{repo}/{}", class.provider);
+		let live = self.live_for(repo, class.provider, queued, survey)
+			+ pending.get(&quota).copied().unwrap_or(0);
+		if let Err(denial) =
+			policy::admit(&self.config, &class, repo, &request, live)
+		{
 			{
 				self.log_refusal(&job.handle, &denial.to_string());
 				self.report(
@@ -115,8 +118,8 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			}
 		}
 
-		if survey.blind.contains(&label.provider) {
-			warn!(handle = %job.handle, provider = ?label.provider, "held back: this provider's machines are not visible");
+		if survey.blind.contains(&class.provider) {
+			warn!(handle = %job.handle, provider = ?class.provider, "held back: this provider's machines are not visible");
 			return Ok(());
 		}
 
@@ -125,29 +128,29 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			&sha,
 			run_url.as_deref(),
 			StatusState::Pending,
-			&format!("provisioning a {} machine", label.name()),
+			&format!("provisioning a {} machine", class.name()),
 		)
 		.await;
 
 		let name = naming::machine_name(
 			self.config.machine_prefix(),
-			&label.name(),
+			&class.name(),
 			&job.handle,
 		);
 		let registration = self.forgejo.register_runner(repo, &name).await?;
 		let user_data = cloudinit::render(
 			&self.config.daemon,
-			&label,
+			&class,
 			&self.config.forgejo.url,
 			&registration,
 			&job.handle,
 		);
 
-		match self.place(&label, &name, &user_data).await {
+		match self.place(&class, &name, &user_data).await {
 			Ok((placement, machine)) => {
 				self.unseen
-					.insert(machine.name.clone(), (label.provider, machine));
-				*pending.entry(label.name()).or_default() += 1;
+					.insert(machine.name.clone(), (class.provider, machine));
+				*pending.entry(quota).or_default() += 1;
 				info!(machine = %name, %placement, "created");
 				self.alerts.clear(Kind::CreateFailed, &job.handle);
 				self.report(
@@ -196,42 +199,59 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			.retain(|handle, _| live.contains(handle.as_str()));
 	}
 
-	fn live_for_label(
+	/// By handle, never by class name: a rename must not empty the quota
+	/// while the machines it renamed are still billing
+	fn live_for(
 		&self,
-		name: &str,
-		fleet: &Machines,
-		names: &[String],
+		repo: &Repo,
+		provider: Provider,
+		queued: &[Queued],
+		survey: &Survey,
 	) -> usize {
-		fleet
+		let head = format!("{}-", self.config.machine_prefix());
+		let mine: Vec<String> = queued
 			.iter()
-			.filter(|(_, machine)| {
-				naming::split(
-					self.config.machine_prefix(),
-					&machine.name,
-					names,
-				)
-				.is_some_and(|(label, _)| label == name)
+			.filter(|entry| &entry.repo == repo)
+			.map(|entry| {
+				format!("-{}", naming::truncated_handle(&entry.job.handle))
+			})
+			.collect();
+		let mut counted: HashSet<&str> = HashSet::new();
+		survey
+			.fleet
+			.iter()
+			.map(|(kind, machine)| (*kind, machine.name.as_str()))
+			.chain(
+				self.unseen
+					.values()
+					.map(|(kind, machine)| (*kind, machine.name.as_str())),
+			)
+			.filter(|(_, name)| counted.insert(name))
+			.filter(|(kind, name)| {
+				*kind == provider
+					&& name.starts_with(&head)
+					&& mine.iter().any(|tail| name.ends_with(tail.as_str()))
 			})
 			.count()
 	}
 
 	async fn place(
 		&self,
-		label: &Label,
+		class: &Class,
 		name: &str,
 		user_data: &str,
 	) -> Result<(String, Machine)> {
 		let mut last = None;
-		for placement in placements(label) {
+		for placement in placements(class) {
 			match self
 				.clouds
 				.create(
-					label.provider,
+					class.provider,
 					name,
 					&placement.plan,
 					&placement.location,
-					&label.image,
-					label.ssh_key.as_deref(),
+					&class.image,
+					class.ssh_key.as_deref(),
 					user_data,
 				)
 				.await
@@ -249,7 +269,7 @@ impl<Q: Queue, F: Fleet> Orchestrator<Q, F> {
 			}
 		}
 		Err(last.unwrap_or_else(|| {
-			anyhow::anyhow!("{}: nowhere to place it", label.name())
+			anyhow::anyhow!("{}: nowhere to place it", class.name())
 		}))
 	}
 }

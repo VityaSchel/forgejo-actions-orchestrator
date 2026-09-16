@@ -12,6 +12,7 @@ locations = ["fsn1"]
 ssh_key = "ci"
 
 [provider.cherry]
+region = "eu"
 locations = ["LT-Siauliai"]
 
 [image.toolchain]
@@ -54,7 +55,7 @@ job_timeout_minutes = 40
 allowed_events = ["push"]
 
 [repo."acme/widgets"]
-max_vms = { hetzner = 2, linode = 1 }
+max_vms = { hetzner = 2, cherry = 1 }
 
 [repo."acme/gadgets"]
 max_vms = { hetzner = 1 }

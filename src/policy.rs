@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::config::{Config, Label};
+use crate::config::{Class, Config, Provider, Repo};
 
 #[derive(Debug, Clone)]
 pub struct JobRequest {
@@ -13,33 +13,50 @@ pub struct JobRequest {
 pub enum Denial {
 	NoLabel,
 	NoEvent,
-	UnknownLabels(Vec<String>),
-	EventNotAllowed { label: String, event: String },
+	Unresolvable(String),
+	EventNotAllowed {
+		class: String,
+		event: String,
+	},
 	ForkPullRequest(String),
-	AtCapacity { label: String, max: usize },
+	NotGranted {
+		repo: String,
+		provider: Provider,
+	},
+	AtCapacity {
+		repo: String,
+		provider: Provider,
+		max: usize,
+	},
 }
 
 impl fmt::Display for Denial {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::NoLabel => write!(f, "job declares no runs-on label"),
-			Self::NoEvent => {
-				write!(f, "run reports no triggering event")
+			Self::NoEvent => write!(f, "run reports no triggering event"),
+			Self::Unresolvable(why) => write!(f, "{why}"),
+			Self::EventNotAllowed { class, event } => {
+				write!(f, "class {class} is not available to {event} events")
 			}
-			Self::UnknownLabels(labels) => {
-				write!(f, "no configuration for labels {}", labels.join(", "))
-			}
-			Self::EventNotAllowed { label, event } => {
-				write!(f, "label {label} is not available to {event} events")
-			}
-			Self::ForkPullRequest(label) => {
+			Self::ForkPullRequest(class) => {
 				write!(
 					f,
-					"label {label} is not available to fork pull requests"
+					"class {class} is not available to fork pull requests"
 				)
 			}
-			Self::AtCapacity { label, max } => {
-				write!(f, "label {label} already has {max} machine(s) running")
+			Self::NotGranted { repo, provider } => {
+				write!(f, "{repo} is not granted any {provider} machine")
+			}
+			Self::AtCapacity {
+				repo,
+				provider,
+				max,
+			} => {
+				write!(
+					f,
+					"{repo} already has {max} {provider} machine(s) running"
+				)
 			}
 		}
 	}
@@ -48,38 +65,48 @@ impl fmt::Display for Denial {
 pub fn resolve<'a>(
 	config: &'a Config,
 	request: &JobRequest,
-) -> Result<&'a Label, Denial> {
+) -> Result<&'a Class, Denial> {
 	if request.runs_on.is_empty() {
 		return Err(Denial::NoLabel);
 	}
 	config
-		.label_for(&request.runs_on)
-		.ok_or_else(|| Denial::UnknownLabels(request.runs_on.clone()))
+		.class_for(&request.runs_on)
+		.map_err(Denial::Unresolvable)
 }
 
 pub fn admit(
-	label: &Label,
+	config: &Config,
+	class: &Class,
+	repo: &Repo,
 	request: &JobRequest,
 	live: usize,
 ) -> Result<(), Denial> {
 	if request.event.is_empty() {
 		return Err(Denial::NoEvent);
 	}
-	if !label.allowed_events.iter().any(|e| e == &request.event) {
+	if !class.allowed_events.iter().any(|e| e == &request.event) {
 		return Err(Denial::EventNotAllowed {
-			label: label.name(),
+			class: class.name(),
 			event: request.event.clone(),
 		});
 	}
 
-	if request.is_fork_pull_request && !label.allow_fork_pull_request {
-		return Err(Denial::ForkPullRequest(label.name()));
+	if request.is_fork_pull_request && !class.allow_fork_pull_request {
+		return Err(Denial::ForkPullRequest(class.name()));
 	}
 
-	if live >= label.max_vms {
+	let max = config.max_vms(repo, class.provider);
+	if max == 0 {
+		return Err(Denial::NotGranted {
+			repo: repo.to_string(),
+			provider: class.provider,
+		});
+	}
+	if live >= max {
 		return Err(Denial::AtCapacity {
-			label: label.name(),
-			max: label.max_vms,
+			repo: repo.to_string(),
+			provider: class.provider,
+			max,
 		});
 	}
 
@@ -88,52 +115,72 @@ pub fn admit(
 
 #[cfg(test)]
 mod tests {
-
-	fn decide<'a>(
-		config: &'a Config,
-		request: &JobRequest,
-		live: usize,
-	) -> Result<&'a Label, Denial> {
-		let label = resolve(config, request)?;
-		admit(label, request, live)?;
-		Ok(label)
-	}
 	use super::*;
 
 	fn config() -> Config {
 		Config::parse(include_str!("../fixtures/config.toml")).unwrap()
 	}
 
+	fn widgets() -> Repo {
+		Repo {
+			owner: "acme".into(),
+			name: "widgets".into(),
+		}
+	}
+
+	fn gadgets() -> Repo {
+		Repo {
+			owner: "acme".into(),
+			name: "gadgets".into(),
+		}
+	}
+
+	fn decide<'a>(
+		config: &'a Config,
+		repo: &Repo,
+		request: &JobRequest,
+		live: usize,
+	) -> Result<&'a Class, Denial> {
+		let class = resolve(config, request)?;
+		admit(config, class, repo, request, live)?;
+		Ok(class)
+	}
+
 	fn request(labels: &[&str], event: &str, fork: bool) -> JobRequest {
 		JobRequest {
-			runs_on: labels.iter().map(|s| s.to_string()).collect(),
+			runs_on: labels.iter().map(|s| (*s).to_string()).collect(),
 			event: event.to_string(),
 			is_fork_pull_request: fork,
 		}
 	}
 
 	#[test]
-	fn allows_a_fork_pull_request_on_the_cheap_label() {
+	fn allows_a_fork_pull_request_on_a_fork_open_set() {
 		let config = config();
-		let label =
-			decide(&config, &request(&["check"], "pull_request", true), 0)
-				.unwrap();
-		assert_eq!(label.name(), "check");
+		let class = decide(
+			&config,
+			&widgets(),
+			&request(&["check", "hetzner"], "pull_request", true),
+			0,
+		)
+		.unwrap();
+		assert_eq!(class.name(), "check-hetzner");
 	}
 
 	#[test]
-	fn refuses_an_expensive_label_to_a_fork_pull_request() {
+	fn refuses_a_set_the_event_may_not_use() {
 		let config = config();
 		let denial = decide(
 			&config,
-			&request(&["builder", "cherry"], "pull_request", true),
+			&widgets(),
+			&request(&["build", "hetzner"], "pull_request", true),
 			0,
 		)
 		.unwrap_err();
 		assert_eq!(
 			denial,
 			Denial::EventNotAllowed {
-				label: "builder-cherry".into(),
+				class: "build-hetzner".into(),
 				event: "pull_request".into()
 			}
 		);
@@ -142,46 +189,65 @@ mod tests {
 	#[test]
 	fn refuses_a_fork_pull_request_even_on_an_allowed_event() {
 		let config = config();
-		let denial =
-			decide(&config, &request(&["builder", "cherry"], "push", true), 0)
-				.unwrap_err();
-		assert_eq!(denial, Denial::ForkPullRequest("builder-cherry".into()));
-	}
-
-	#[test]
-	fn allows_the_expensive_label_to_a_trusted_push() {
-		let config = config();
-		let label =
-			decide(&config, &request(&["builder", "cherry"], "push", false), 0)
-				.unwrap();
-		assert_eq!(label.name(), "builder-cherry");
-	}
-
-	#[test]
-	fn refuses_an_unknown_label() {
-		let config = config();
-		let denial =
-			decide(&config, &request(&["nope"], "push", false), 0).unwrap_err();
-		assert_eq!(denial, Denial::UnknownLabels(vec!["nope".into()]));
-	}
-
-	#[test]
-	fn refuses_an_unconfigured_label_set() {
-		let config = config();
 		let denial = decide(
 			&config,
-			&request(&["check", "cherry"], "pull_request", false),
+			&widgets(),
+			&request(&["build", "hetzner"], "push", true),
 			0,
 		)
 		.unwrap_err();
-		assert!(matches!(denial, Denial::UnknownLabels(_)));
+		assert_eq!(denial, Denial::ForkPullRequest("build-hetzner".into()));
+	}
+
+	#[test]
+	fn allows_a_trusted_push_on_a_fork_closed_set() {
+		let config = config();
+		let class = decide(
+			&config,
+			&widgets(),
+			&request(&["build", "hetzner"], "push", false),
+			0,
+		)
+		.unwrap();
+		assert_eq!(class.name(), "build-hetzner");
+	}
+
+	#[test]
+	fn refuses_an_unknown_token() {
+		let config = config();
+		let denial = decide(
+			&config,
+			&widgets(),
+			&request(&["nope", "hetzner"], "push", false),
+			0,
+		)
+		.unwrap_err();
+		assert!(matches!(denial, Denial::Unresolvable(_)));
+	}
+
+	#[test]
+	fn refuses_a_runs_on_no_entry_answers_to() {
+		let config = config();
+		let denial = decide(
+			&config,
+			&widgets(),
+			&request(&["check"], "pull_request", false),
+			0,
+		)
+		.unwrap_err();
+		assert!(matches!(denial, Denial::Unresolvable(_)));
 	}
 
 	#[test]
 	fn refuses_a_run_that_reports_no_event() {
 		let config = config();
-		let denial =
-			decide(&config, &request(&["check"], "", false), 0).unwrap_err();
+		let denial = decide(
+			&config,
+			&widgets(),
+			&request(&["check", "hetzner"], "", false),
+			0,
+		)
+		.unwrap_err();
 		assert_eq!(
 			denial,
 			Denial::NoEvent,
@@ -193,22 +259,59 @@ mod tests {
 	fn refuses_a_job_with_no_label() {
 		let config = config();
 		let denial =
-			decide(&config, &request(&[], "push", false), 0).unwrap_err();
+			decide(&config, &widgets(), &request(&[], "push", false), 0)
+				.unwrap_err();
 		assert_eq!(denial, Denial::NoLabel);
 	}
 
 	#[test]
-	fn refuses_once_the_label_is_at_capacity() {
+	fn refuses_a_provider_the_repository_was_never_granted() {
 		let config = config();
-		let denial =
-			decide(&config, &request(&["check"], "pull_request", true), 1)
-				.unwrap_err();
+		let denial = decide(
+			&config,
+			&gadgets(),
+			&request(&["build", "cherry"], "push", false),
+			0,
+		)
+		.unwrap_err();
+		assert_eq!(
+			denial,
+			Denial::NotGranted {
+				repo: "acme/gadgets".into(),
+				provider: Provider::Cherry
+			}
+		);
+	}
+
+	#[test]
+	fn refuses_once_the_repository_fills_its_grant() {
+		let config = config();
+		let denial = decide(
+			&config,
+			&gadgets(),
+			&request(&["check", "hetzner"], "pull_request", true),
+			1,
+		)
+		.unwrap_err();
 		assert_eq!(
 			denial,
 			Denial::AtCapacity {
-				label: "check".into(),
+				repo: "acme/gadgets".into(),
+				provider: Provider::Hetzner,
 				max: 1
 			}
 		);
+	}
+
+	#[test]
+	fn one_repository_filling_its_grant_leaves_another_room() {
+		let config = config();
+		decide(
+			&config,
+			&widgets(),
+			&request(&["check", "hetzner"], "pull_request", true),
+			1,
+		)
+		.expect("widgets is granted two, so its second machine is allowed");
 	}
 }

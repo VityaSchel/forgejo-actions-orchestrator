@@ -1,15 +1,6 @@
 [forgejo]
 url = "https://git.example.org"
 
-#! Only repositories with Actions enabled. A repo that fails to poll delays teardown for all of them.
-[[repo]]
-owner = "example"
-name = "example"
-
-# [[repo]]
-# owner = "example"
-# name = "another-repo"
-
 [daemon]
 poll_interval_secs = 15
 #! Extra time past lifetime_minutes before an overdue machine is destroyed
@@ -19,100 +10,90 @@ runner_version = "12.13.2"
 #! SHA-256 of forgejo-runner-<version>-linux-<arch>
 runner_sha256_amd64 = "2b4c3751fc2f9a60f753ef97414949de25587dfa2b921870b0cb6cb7c9bf7080"
 runner_sha256_arm64 = "21ae372961bc96b68ac91ceafb6bb1b0ea2493c22ffe24988f7cf578f5fbe58f"
-#! The daemon owns every machine whose name starts with this. Orchestrators sharing
-#! a cloud account need prefixes that aren't prefixes of each other, e.g. not "ci" and "ci-orc".
+#! The daemon owns every machine whose name starts with this
 machine_prefix = "ci-orc"
 
 #! Optional. POSTs {kind, subject, detail, consecutive}, repeats at most every 15 minutes
 # [alert]
 # webhook_url = "https://git.example.org/_hooks/ci-orchestrator"
 
-#! See plan prices as of 2026-09-01 at the end of the file.
+#! ========== Providers ==========
 
-#! ========== Pull request checks ==========
-
-#! A job runs here when its runs-on equals labels, in any order
-[[label]]
-labels = ["check", "hetzner"]
-provider = "hetzner"
-#! Each plan is tried in every location, in order
-plans = ["cx43", "cx53", "cpx42"]
+[provider.hetzner]
 locations = ["fsn1", "nbg1", "hel1"]
-#! Snapshot id
-image = "000000000"
-#! Hetzner: key name or id. Vultr: key id. Gcore: key pair name. Scaleway: leave unset.
-# ssh_key = "..."
-max_vms = 1
-lifetime_minutes = 90
-#! Counted from runner start, so leave room for boot. Must be less than
-#! lifetime_minutes. Unlike timeout-minutes, a pull request cannot raise it.
-job_timeout_minutes = 60
-#! This label reaches no secrets
-allow_fork_pull_request = true
-#! Cron runs are "schedule", manual runs "workflow_dispatch"
-allowed_events = ["pull_request", "pull_request_target", "workflow_dispatch"]
+ssh_key = "ci"
 
-#! ============== Releases ==============
-
-[[label]]
-labels = ["release", "hetzner"]
-provider = "hetzner"
-plans = ["cx43", "cx53", "cpx42"]
-locations = ["fsn1", "nbg1", "hel1"]
-image = "debian-12"
-max_vms = 1
-lifetime_minutes = 90
-#! Jobs here can read signing keys and publish tokens
-allow_fork_pull_request = false
-allowed_events = ["push", "workflow_dispatch"]
-
-#! ========== Other providers ==========
-
-# [[label]]
-# labels = ["build", "vultr"]
-# provider = "vultr"
-#! vhp-8c-16gb-amd: 8 shared vCPU, 16 GB RAM, $0.132/hr
-# plans = ["vhp-8c-16gb-amd"]
-# locations = ["ams", "fra", "cdg", "waw", "ewr", "ord", "dfw", "lax", "sgp"]
-#! os_id 2136 is Debian 12 x64
-# image = "2136"
-# lifetime_minutes = 90
-# allowed_events = ["push", "workflow_dispatch"]
-
-# [[label]]
-# labels = ["build", "cherry"]
-# provider = "cherry"
-#! G1-8-32gb-200nv-ded: 8 dedicated vCPU, 32 GB RAM, €0.152/hr
-# plans = ["G1-8-32gb-200nv-ded"]
-# locations = ["LT-Siauliai", "NL-Amsterdam", "US-Chicago", "SG-Singapore"]
-# image = "debian_12_64bit"
-# lifetime_minutes = 90
-# allowed_events = ["push", "workflow_dispatch"]
-
-#! Scaleway and Gcore bill an 80 GB boot volume on top of the plan price
-
-# [[label]]
-# labels = ["build-arm64", "scaleway"]
-# provider = "scaleway"
-#! BASIC2-A8C-16G: 8 arm64 vCPU, 16 GB RAM, €0.1034/hr
-# plans = ["BASIC2-A8C-16G"]
+#! No ssh_key: the Instance API has no per-server key field and the provider refuses one.
+#! No local disk, so an 80 GB volume is created and deleted with the server.
+# [provider.scaleway]
 # locations = ["fr-par-1", "fr-par-2", "nl-ams-1"]
-# image = "debian_bookworm"
-# lifetime_minutes = 90
-# allowed_events = ["workflow_dispatch"]
 
-# [[label]]
-# labels = ["build-arm64", "gcore"]
-# provider = "gcore"
-#! a1-standard-8-16: 8 arm64 vCPU, 16 GB RAM, €0.10612/hr in Tokyo
-# plans = ["a1-standard-8-16"]
-#! Region 30 is Tokyo. Not every region sells a1-standard.
+#! Locations are numeric region ids, not names: 30 is Tokyo
+# [provider.gcore]
 # locations = ["30"]
-#! debian-12-generic-arm64-qcow2 in region 30. Every region has its own image ids.
-# image = "d52b7e87-50f2-4ad0-a5f8-8b9f80591384"
-# lifetime_minutes = 90
-# allowed_events = ["workflow_dispatch"]
+# ssh_key = "ci"
 
+#! ========== Images ==========
+
+[image.debian]
+hetzner = "debian-12"
+# cherry = "debian_12_64bit"
+#! 2136: Debian 12 x64
+# vultr = "2136"
+
+#! A snapshot's SOURCE disk is a floor on every plan, and it boots only on its own architecture
+[image.toolchain]
+hetzner = "snapshot-1"
+
+#! ========== Plans ==========
+#! Tried in order, every plan in every location
+
+[plans.4c8g]
+hetzner = ["cx33", "cx43", "cpx31"]
+
+[plans.8c16g]
+hetzner = ["cx43", "cx53", "cpx41", "cpx42"]
+# cherry = ["G1-8-32gb-200nv-ded", "G1-12-48gb-300nv-ded"]
+
+[plans.arm-8c16g]
+hetzner = ["cax31", "cax41"]
+
+#! ========== Machines ==========
+#! job_timeout_minutes counts from runner start, so boot time eats the margin
+
+[[machine]]
+labels = ["check", "hetzner"]
+image = "toolchain"
+plans = "8c16g"
+lifetime_minutes = 90
+job_timeout_minutes = 70
+allow_fork_pull_request = true
+allowed_events = ["pull_request", "workflow_dispatch"]
+
+[[machine]]
+labels = [["build", "hetzner"]]
+image = "debian"
+plans = "8c16g"
+lifetime_minutes = 90
+job_timeout_minutes = 70
+allowed_events = ["workflow_dispatch"]
+
+[[machine]]
+labels = ["build-arm64", "hetzner"]
+image = "debian"
+plans = "arm-8c16g"
+lifetime_minutes = 65
+job_timeout_minutes = 45
+allowed_events = ["workflow_dispatch"]
+
+#! ========== Repositories ==========
+#! max_vms is the per-provider allowlist and quota. Only repos with Actions enabled.
+
+[repo."example/example"]
+max_vms = { hetzner = 2 }
+
+# [repo."example/another-repo"]
+# max_vms = { hetzner = 1 }
 
 #! Provider prices (last updated 2026-09-01)
 #! Generated by scripts/pricing.py, do not edit by hand.

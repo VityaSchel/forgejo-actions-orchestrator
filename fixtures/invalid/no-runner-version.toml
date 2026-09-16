@@ -1,25 +1,60 @@
 [forgejo]
 url = "https://git.example.org"
 
-[[repo]]
-owner = "acme"
-name = "widgets"
-
-[[repo]]
-owner = "acme"
-name = "gadgets"
-
 [daemon]
 runner_version = ""
 runner_sha256_amd64 = "2b4c3751fc2f9a60f753ef97414949de25587dfa2b921870b0cb6cb7c9bf7080"
 runner_sha256_arm64 = "21ae372961bc96b68ac91ceafb6bb1b0ea2493c22ffe24988f7cf578f5fbe58f"
 reconcile_grace_secs = 0
 
-[[label]]
-labels = ["check"]
-provider = "hetzner"
-plans = ["cx43"]
+[provider.hetzner]
 locations = ["fsn1"]
-image = "snapshot-1"
-max_vms = 1
+ssh_key = "ci"
+
+[provider.cherry]
+locations = ["LT-Siauliai"]
+
+[image.toolchain]
+hetzner = "snapshot-1"
+
+[image.debian]
+hetzner = "debian-12"
+cherry = "debian_12_64bit"
+
+[plans.8c16g]
+hetzner = ["cx43", "cx53"]
+cherry = ["G1"]
+
+[plans.4c8g]
+hetzner = ["cx33"]
+
+[[machine]]
+labels = ["check", "hetzner"]
+image = "toolchain"
+plans = "8c16g"
+lifetime_minutes = 90
+job_timeout_minutes = 70
+allow_fork_pull_request = true
 allowed_events = ["pull_request"]
+
+[[machine]]
+labels = [["build", "hetzner"], ["build", "cherry"]]
+image = "debian"
+plans = "8c16g"
+lifetime_minutes = 90
+job_timeout_minutes = 70
+allowed_events = ["push", "workflow_dispatch"]
+
+[[machine]]
+labels = ["hetzner"]
+image = "debian"
+plans = "4c8g"
+lifetime_minutes = 60
+job_timeout_minutes = 40
+allowed_events = ["push"]
+
+[repo."acme/widgets"]
+max_vms = { hetzner = 2, cherry = 1 }
+
+[repo."acme/gadgets"]
+max_vms = { hetzner = 1 }
