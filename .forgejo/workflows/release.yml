@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ["release-x86", "hetzner"]
+    runs-on: ["debian", "8c16g", "hetzner"]
     timeout-minutes: 60
     defaults:
       run:

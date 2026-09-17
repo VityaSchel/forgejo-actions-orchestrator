@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ["check", "hetzner"]
+    runs-on: ["fork", "debian", "4c8g", "hetzner"]
     timeout-minutes: 25
     defaults:
       run:
