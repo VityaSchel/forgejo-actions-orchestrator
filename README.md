@@ -41,7 +41,7 @@ The steps use `example` as the instance name. Choose your own instance name and 
 1. Download the binary from [Releases](https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases) (4.6 MB):
 
    ```sh
-   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases/download/v1.2.0/forgejo-actions-orchestrator-linux-x86_64
+   wget https://git.hloth.dev/hloth/forgejo-actions-orchestrator/releases/download/v1.2.1/forgejo-actions-orchestrator-linux-x86_64
    install -Dm755 forgejo-actions-orchestrator-linux-x86_64 /usr/local/bin/forgejo-actions-orchestrator
    ```
 
